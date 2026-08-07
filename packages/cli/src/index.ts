@@ -188,9 +188,11 @@ function printEvent(event: KernelEvent): void {
       }
       break;
     }
-    case "git.commit":
-      console.log(`[git] commit ${(p.sha as string).slice(0, 8)} — ${p.message}`);
+    case "git.commit": {
+      const msg = String(p.message ?? "").split("\n")[0] ?? "";
+      console.log(`[git] commit ${(p.sha as string).slice(0, 8)} — ${msg}`);
       break;
+    }
     case "review.completed":
       console.log(`[review] passed=${p.passed} comments=${(p.comments as unknown[]).length}`);
       break;

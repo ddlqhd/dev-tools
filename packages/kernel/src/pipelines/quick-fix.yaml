@@ -19,6 +19,9 @@ nodes:
   verify:
     type: command
     run: ["pnpm lint", "pnpm test"]
+    onFail:
+      goto: reviewLoop
+      asComment: blocker
   commit:
     type: commit
     messageStyle: conventional
@@ -30,5 +33,8 @@ flow:
       maxIterations: 5
       body: [codeReview, fixReview]
       until: codeReview.passed
-  - verify
+  - verify:
+      onFail:
+        goto: reviewLoop
+        asComment: blocker
   - commit

@@ -1,8 +1,16 @@
-import { readFile, unlink } from "node:fs/promises";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ReviewResultSchema, type NodeSpec, type ReviewResult } from "@devtools/shared";
+import {
+  ReviewResultSchema,
+  type EngineTurnResult,
+  type NodeSpec,
+  type ReviewResult,
+} from "@devtools/shared";
 import { renderPrompt } from "../../prompts/index.js";
+import { assertOnlyAllowedWrites } from "../artifact-guard.js";
 import type { NodeContext, NodeResult, NodeRunner } from "../node.js";
+
+const REVIEW_FILE = ".codeloop-review.json";
 
 export class ReviewNodeRunner implements NodeRunner {
   readonly type = "review" as const;
@@ -19,21 +27,28 @@ export class ReviewNodeRunner implements NodeRunner {
       instructions: ctx.instructions,
     });
 
-    const reviewPath = join(ctx.worktree.worktreePath, ".codeloop-review.json");
+    const reviewPath = join(ctx.worktree.worktreePath, REVIEW_FILE);
     try {
       await unlink(reviewPath);
     } catch {
       // ok
     }
 
+    const preHead = await ctx.worktree.head();
     let lastError: string | undefined;
     for (let attempt = 0; attempt < 3; attempt++) {
       const turnPrompt =
         attempt === 0
           ? prompt
-          : `${prompt}\n\nYour previous output was invalid JSON (${lastError}). Rewrite \`.codeloop-review.json\` with valid JSON only.`;
+          : [
+              `Rewrite the review result using the Write tool to exactly \`${REVIEW_FILE}\`.`,
+              "Valid JSON only. Do not modify any other files.",
+              `Previous error: ${lastError}`,
+              "",
+              prompt,
+            ].join("\n");
 
-      await ctx.engine.send(turnPrompt, (chunk) => {
+      const result = await ctx.engine.send(turnPrompt, (chunk) => {
         void ctx.emit({
           type: "engine.chunk",
           payload: { nodeId: nodeId(ctx), chunk },
@@ -41,7 +56,14 @@ export class ReviewNodeRunner implements NodeRunner {
       });
 
       try {
-        const raw = await readFile(reviewPath, "utf8");
+        await assertOnlyAllowedWrites(
+          ctx.worktree,
+          [REVIEW_FILE],
+          result.filesChanged,
+          preHead,
+        );
+
+        const raw = await resolveReviewJson(reviewPath, result);
         const parsed = ReviewResultSchema.parse(JSON.parse(raw));
         const gated = applySeverityGate(parsed, spec.severityGate ?? "major");
 
@@ -60,6 +82,12 @@ export class ReviewNodeRunner implements NodeRunner {
           },
         });
 
+        try {
+          await unlink(reviewPath);
+        } catch {
+          // ok
+        }
+
         return {
           outputs: {
             [outKey]: { key: outKey, path: saved, kind: "json" },
@@ -68,10 +96,63 @@ export class ReviewNodeRunner implements NodeRunner {
         };
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
+        // Restore clean worktree before retry when the guard already reset, or on parse errors.
+        try {
+          await ctx.worktree.resetHard(preHead);
+        } catch {
+          // ok
+        }
       }
     }
 
     throw new Error(`Review structured output failed after retries: ${lastError}`);
+  }
+}
+
+async function resolveReviewJson(
+  reviewPath: string,
+  result: EngineTurnResult,
+): Promise<string> {
+  try {
+    const fromFile = await readFile(reviewPath, "utf8");
+    if (looksLikeReviewJson(fromFile)) return fromFile;
+  } catch {
+    // fall through
+  }
+  if (result.capturedReviewJson?.trim() && looksLikeReviewJson(result.capturedReviewJson)) {
+    await writeFile(reviewPath, result.capturedReviewJson, "utf8");
+    return result.capturedReviewJson;
+  }
+  const extracted = extractJsonObject(result.text);
+  if (extracted) {
+    await writeFile(reviewPath, extracted, "utf8");
+    return extracted;
+  }
+  throw new Error(`ENOENT: missing ${REVIEW_FILE}`);
+}
+
+function looksLikeReviewJson(text: string): boolean {
+  try {
+    ReviewResultSchema.parse(JSON.parse(text));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function extractJsonObject(text: string): string | null {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  const candidate = fenced?.[1]?.trim() ?? text.trim();
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  const slice = candidate.slice(start, end + 1);
+  // Only accept JSON that already matches the review schema — avoid chatter braces.
+  try {
+    ReviewResultSchema.parse(JSON.parse(slice));
+    return slice;
+  } catch {
+    return null;
   }
 }
 

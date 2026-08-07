@@ -56,7 +56,7 @@ export async function loadPipeline(
 
 export function parsePipelineYaml(rawYaml: string): LoadedPipeline {
   const parsed = PipelineDefinitionSchema.parse(parseYaml(rawYaml));
-  const flow = normalizeFlow(parsed.flow as unknown[]);
+  const flow = normalizeFlow(parsed.flow as unknown[], parsed.nodes);
   validatePipeline(parsed, flow);
   const hash = createHash("sha256").update(rawYaml).digest("hex").slice(0, 16);
   return {

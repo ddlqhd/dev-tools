@@ -8,3 +8,4 @@ export { getEngineAdapter, resolveEngineType } from "./engines/registry.js";
 export { PipelineInterpreter } from "./loop/interpreter.js";
 export { KernelStore, EventLog, ArtifactStore } from "./store/index.js";
 export type { EngineAdapter, EngineSession, EngineInfo } from "./engines/adapter.js";
+export { SuspendedError } from "./engines/adapter.js";

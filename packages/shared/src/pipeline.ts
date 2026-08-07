@@ -55,10 +55,18 @@ export type FlowStep =
       until: string;
     };
 
-export function normalizeFlow(rawFlow: unknown[]): FlowStep[] {
+/**
+ * Normalize raw YAML flow. When `nodes` is provided, a bare string step
+ * inherits `nodes[id].onFail` so authors can declare onFail on the node.
+ * Flow-step-level onFail always wins when present.
+ */
+export function normalizeFlow(
+  rawFlow: unknown[],
+  nodes?: Record<string, NodeSpec>,
+): FlowStep[] {
   return rawFlow.map((step, index) => {
     if (typeof step === "string") {
-      return { kind: "node", nodeId: step };
+      return { kind: "node", nodeId: step, onFail: nodes?.[step]?.onFail };
     }
     if (step && typeof step === "object" && "loop" in step) {
       const loop = (step as { loop: { id: string; maxIterations: number; body: string[]; until: string } }).loop;
@@ -74,11 +82,15 @@ export function normalizeFlow(rawFlow: unknown[]): FlowStep[] {
       const entries = Object.entries(step as Record<string, unknown>);
       if (entries.length === 1) {
         const [nodeId, opts] = entries[0]!;
-        const onFail =
+        const flowOnFail =
           opts && typeof opts === "object" && opts !== null && "onFail" in opts
             ? (opts as { onFail: { goto: string; asComment?: string } }).onFail
             : undefined;
-        return { kind: "node", nodeId, onFail };
+        return {
+          kind: "node",
+          nodeId,
+          onFail: flowOnFail ?? nodes?.[nodeId]?.onFail,
+        };
       }
     }
     throw new Error(`Invalid flow step at index ${index}: ${JSON.stringify(step)}`);

@@ -35,18 +35,16 @@ function planPrompt(ctx: PromptContext): string {
 ${ctx.requirement}
 ${instructionsBlock(ctx.instructions)}
 
-## Your task
-1. Explore the codebase as needed (read-only).
-2. Write a concise implementation plan as Markdown.
-3. Save the plan to the file path given below — create/overwrite that exact file.
-4. Do NOT modify any other source files in this turn.
+## Hard rules
+1. Explore the codebase with Read/Glob as needed.
+2. You MUST create/overwrite the file \`.codeloop-plan.md\` using the **Write** tool (not CreatePlan / createPlanToolCall / plan mode UI).
+3. Do NOT modify any other files. The only allowed write is \`.codeloop-plan.md\`.
+4. After writing the file, stop. Do not implement the change.
 
-## Output file (required)
-Write the full plan Markdown to: \`.codeloop-plan.md\`
-
-The plan MUST include:
+## \`.codeloop-plan.md\` contents (Markdown)
+Must include these headings:
 - Goal
-- Approach (steps)
+- Approach (numbered steps)
 - Files likely to change
 - Risks / open questions
 - Test plan
@@ -90,7 +88,7 @@ Do not create a git commit.
 }
 
 function reviewPlanPrompt(ctx: PromptContext): string {
-  return `You are reviewing an implementation plan. Read-only — do not edit code.
+  return `You are reviewing an implementation plan.
 
 ## Requirement
 ${ctx.requirement}
@@ -99,8 +97,12 @@ ${ctx.requirement}
 ${ctx.planDoc ?? ""}
 ${instructionsBlock(ctx.instructions)}
 
-## Output
-Write a JSON file to \`.codeloop-review.json\` with this exact shape:
+## Hard rules
+1. Read the plan (and codebase if needed). Do NOT modify source files.
+2. You MUST write the review JSON with the Write tool to exactly: \`.codeloop-review.json\`
+3. The only allowed write is \`.codeloop-review.json\`.
+
+## \`.codeloop-review.json\` shape
 {
   "passed": boolean,
   "summary": string,
@@ -115,12 +117,12 @@ Write a JSON file to \`.codeloop-review.json\` with this exact shape:
   ]
 }
 
-Mark passed=true only if there are no blocker/major issues.
+Mark passed=true only if there are no open blocker/major issues.
 `;
 }
 
 function reviewCodePrompt(ctx: PromptContext): string {
-  return `You are reviewing code changes for the requirement below. Prefer reading the git diff / changed files. Do not edit code.
+  return `You are reviewing code changes for the requirement below.
 
 ## Requirement
 ${ctx.requirement}
@@ -129,8 +131,12 @@ ${ctx.requirement}
 ${ctx.planDoc ?? "(none)"}
 ${instructionsBlock(ctx.instructions)}
 
-## Output
-Write a JSON file to \`.codeloop-review.json\` with this exact shape:
+## Hard rules
+1. Prefer reading the git diff / changed files. Do NOT modify source files.
+2. You MUST write the review JSON with the Write tool to exactly: \`.codeloop-review.json\`
+3. The only allowed write is \`.codeloop-review.json\`.
+
+## \`.codeloop-review.json\` shape
 {
   "passed": boolean,
   "summary": string,
@@ -147,6 +153,6 @@ Write a JSON file to \`.codeloop-review.json\` with this exact shape:
   ]
 }
 
-Mark passed=true only if there are no blocker/major issues (unless severity gate is lower — still report all findings).
+Mark passed=true only if there are no open blocker/major issues.
 `;
 }

@@ -35,6 +35,7 @@ nodes:
   verify:
     type: command
     run: ["pnpm lint", "pnpm test"]
+    # Also accepted on the node; flow-step form below is the canonical wiring.
     onFail:
       goto: reviewLoop
       asComment: blocker
@@ -55,5 +56,8 @@ flow:
       maxIterations: 5
       body: [codeReview, fixReview]
       until: codeReview.passed
-  - verify
+  - verify:
+      onFail:
+        goto: reviewLoop
+        asComment: blocker
   - commit

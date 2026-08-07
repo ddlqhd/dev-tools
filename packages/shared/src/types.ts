@@ -17,6 +17,10 @@ export interface EngineTurnResult {
   usage?: EngineTurnUsage;
   filesChanged: string[];
   sessionId?: string;
+  /** Captured from Cursor createPlanToolCall when the agent did not Write a file. */
+  capturedPlanMarkdown?: string;
+  /** Captured Write contents for `.codeloop-review.json`. */
+  capturedReviewJson?: string;
 }
 
 export type NodePrimitive = "agent" | "review" | "gate" | "command" | "commit";

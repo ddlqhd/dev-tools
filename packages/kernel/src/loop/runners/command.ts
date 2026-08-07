@@ -23,10 +23,22 @@ export class CommandNodeRunner implements NodeRunner {
         },
       });
       if (result.code !== 0) {
-        failures.push({ command, code: result.code, stderr: result.stderr });
-        if (ctx.config.skipVerifyIfMissing && /not found|ENOENT|no such file/i.test(result.stderr)) {
+        const missing =
+          ctx.config.skipVerifyIfMissing &&
+          /not found|ENOENT|no such file|command not found/i.test(
+            `${result.stderr}\n${result.stdout}`,
+          );
+        if (missing) {
+          await ctx.emit({
+            type: "log",
+            payload: {
+              level: "warn",
+              message: `skip missing command: ${command}`,
+            },
+          });
           continue;
         }
+        failures.push({ command, code: result.code, stderr: result.stderr });
       }
     }
 

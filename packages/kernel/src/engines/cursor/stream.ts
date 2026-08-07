@@ -23,6 +23,10 @@ export interface CursorStreamState {
   finalText?: string;
   isError: boolean;
   errorMessage?: string;
+  /** Markdown extracted from createPlanToolCall when present. */
+  capturedPlanMarkdown?: string;
+  /** JSON text written to `.codeloop-review.json` via Write tool. */
+  capturedReviewJson?: string;
 }
 
 export function createCursorStreamState(): CursorStreamState {
@@ -31,6 +35,44 @@ export function createCursorStreamState(): CursorStreamState {
     filesChanged: new Set(),
     isError: false,
   };
+}
+
+function extractPlanMarkdown(args: Record<string, unknown> | undefined): string | undefined {
+  if (!args) return undefined;
+  const candidates = [
+    args.plan,
+    args.overview,
+    args.content,
+    args.markdown,
+    args.body,
+    typeof args.name === "string" && typeof args.overview === "string"
+      ? `# ${args.name}\n\n${args.overview}`
+      : undefined,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim().length > 40) return c.trim();
+  }
+  // Last resort: pretty-print known fields as markdown
+  const name = typeof args.name === "string" ? args.name : undefined;
+  const overview = typeof args.overview === "string" ? args.overview : undefined;
+  const todos = args.todos ?? args.steps;
+  if (!name && !overview && !todos) return undefined;
+  const lines: string[] = [];
+  if (name) lines.push(`# ${name}`, "");
+  if (overview) lines.push(overview, "");
+  if (Array.isArray(todos)) {
+    lines.push("## Steps", "");
+    for (const t of todos) {
+      if (typeof t === "string") lines.push(`- ${t}`);
+      else if (t && typeof t === "object") {
+        const item = t as Record<string, unknown>;
+        const text = String(item.content ?? item.title ?? item.text ?? JSON.stringify(t));
+        lines.push(`- ${text}`);
+      }
+    }
+  }
+  const md = lines.join("\n").trim();
+  return md.length > 40 ? md : undefined;
 }
 
 export function parseCursorStreamLine(
@@ -93,11 +135,39 @@ export function parseCursorStreamLine(
     }
 
     if (toolCall.writeToolCall) {
-      const args = (toolCall.writeToolCall as { args?: { path?: string } }).args;
+      const args = (
+        toolCall.writeToolCall as {
+          args?: { path?: string; fileText?: string; contents?: string };
+        }
+      ).args;
       const path = args?.path ?? "?";
       state.filesChanged.add(path);
+      const fileText = args?.fileText ?? args?.contents;
+      if (typeof fileText === "string") {
+        const norm = path.replace(/\\/g, "/");
+        if (/(^|\/)\.codeloop-plan\.md$/.test(norm)) {
+          state.capturedPlanMarkdown = fileText;
+        }
+        if (/(^|\/)\.codeloop-review\.json$/.test(norm)) {
+          state.capturedReviewJson = fileText;
+        }
+      }
       chunks.push({ kind: "toolUse", tool: "Write", summary: path });
       chunks.push({ kind: "fileChange", path, op: "create" });
+      return chunks;
+    }
+
+    if (toolCall.createPlanToolCall) {
+      const args = (toolCall.createPlanToolCall as { args?: Record<string, unknown> }).args;
+      const md = extractPlanMarkdown(args);
+      if (md) state.capturedPlanMarkdown = md;
+      const summary =
+        typeof args?.name === "string"
+          ? args.name
+          : md
+            ? md.slice(0, 60)
+            : "plan";
+      chunks.push({ kind: "toolUse", tool: "CreatePlan", summary });
       return chunks;
     }
 
@@ -130,18 +200,30 @@ export function parseCursorStreamLine(
   if (type === "tool_call" && event.subtype === "completed") {
     const toolCall = event.tool_call as Record<string, unknown> | undefined;
     if (toolCall?.writeToolCall) {
-      const result = (
-        toolCall.writeToolCall as {
-          result?: { success?: { path?: string } };
-          args?: { path?: string };
-        }
-      ).result?.success;
-      const argsPath = (toolCall.writeToolCall as { args?: { path?: string } }).args?.path;
-      const path = result?.path ?? argsPath;
+      const write = toolCall.writeToolCall as {
+        result?: { success?: { path?: string } };
+        args?: { path?: string; fileText?: string; contents?: string };
+      };
+      const path = write.result?.success?.path ?? write.args?.path;
       if (path) {
         state.filesChanged.add(path);
         chunks.push({ kind: "fileChange", path, op: "edit" });
       }
+      const fileText = write.args?.fileText ?? write.args?.contents;
+      if (typeof fileText === "string" && path) {
+        const norm = path.replace(/\\/g, "/");
+        if (/(^|\/)\.codeloop-plan\.md$/.test(norm)) {
+          state.capturedPlanMarkdown = fileText;
+        }
+        if (/(^|\/)\.codeloop-review\.json$/.test(norm)) {
+          state.capturedReviewJson = fileText;
+        }
+      }
+    }
+    if (toolCall?.createPlanToolCall) {
+      const args = (toolCall.createPlanToolCall as { args?: Record<string, unknown> }).args;
+      const md = extractPlanMarkdown(args);
+      if (md) state.capturedPlanMarkdown = md;
     }
     return chunks;
   }

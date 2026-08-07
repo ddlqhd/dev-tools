@@ -66,6 +66,11 @@ class CursorSession implements EngineSession {
 
   async send(prompt: string, onChunk?: (c: EngineChunk) => void): Promise<EngineTurnResult> {
     this.interrupted = false;
+    const signal = this.opts.signal;
+    if (signal?.aborted) {
+      throw new EngineError("Cursor agent aborted before start");
+    }
+
     const binary = (await which(CURSOR_BIN)) ?? CURSOR_BIN;
     await assertDir(this.opts.cwd);
 
@@ -74,6 +79,7 @@ class CursorSession implements EngineSession {
       cwd: this.opts.cwd,
       model: this.opts.model,
       readonly: this.opts.readonly ?? false,
+      artifactWriteOnly: this.opts.artifactWriteOnly ?? false,
       resume: this.sessionId || undefined,
     });
 
@@ -95,10 +101,12 @@ class CursorSession implements EngineSession {
       let idleTimer: NodeJS.Timeout | undefined;
       let nodeTimer: NodeJS.Timeout | undefined;
       const stderrChunks: string[] = [];
+      let onAbort: (() => void) | undefined;
 
       const cleanup = () => {
         if (idleTimer) clearTimeout(idleTimer);
         if (nodeTimer) clearTimeout(nodeTimer);
+        if (onAbort) signal?.removeEventListener("abort", onAbort);
         this.child = null;
       };
 
@@ -115,6 +123,13 @@ class CursorSession implements EngineSession {
         cleanup();
         resolve(result);
       };
+
+      onAbort = () => {
+        void this.interrupt().finally(() => {
+          fail(new EngineError("Cursor agent aborted"));
+        });
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
 
       const bumpIdle = () => {
         if (idleTimer) clearTimeout(idleTimer);
@@ -184,6 +199,8 @@ class CursorSession implements EngineSession {
           text,
           filesChanged: [...state.filesChanged],
           sessionId: this.sessionId || undefined,
+          capturedPlanMarkdown: state.capturedPlanMarkdown,
+          capturedReviewJson: state.capturedReviewJson,
         });
       });
     });
@@ -208,6 +225,7 @@ function buildArgs(opts: {
   cwd: string;
   model?: string;
   readonly: boolean;
+  artifactWriteOnly: boolean;
   resume?: string;
 }): string[] {
   // Prompt as positional arg; avoid stdin complexity for M1.
@@ -221,8 +239,14 @@ function buildArgs(opts: {
     opts.cwd,
   ];
 
-  if (opts.readonly) {
-    args.push("--mode", "plan");
+  if (opts.artifactWriteOnly) {
+    // Need Write for `.codeloop-plan.md`. Do NOT use `--mode plan` (blocks Write,
+    // steers the agent into createPlanToolCall).
+    args.push("--force");
+    args.push("--sandbox", "enabled");
+  } else if (opts.readonly) {
+    // True read-only review / Q&A.
+    args.push("--mode", "ask");
   } else {
     args.push("--force");
     args.push("--sandbox", "enabled");

@@ -2,11 +2,10 @@ import type {
   FlowStep,
   InterventionDecision,
   InterventionRequest,
-  KernelEvent,
   LoopStackEntry,
   NodeSpec,
 } from "@devtools/shared";
-import type { EngineAdapter, EngineSession } from "../engines/adapter.js";
+import { SuspendedError, type EngineAdapter, type EngineSession } from "../engines/adapter.js";
 import { getEngineAdapter, resolveEngineType } from "../engines/registry.js";
 import type { ArtifactStore, EventLog, KernelStore } from "../store/index.js";
 import type { GitWorktree } from "../git/worktree.js";
@@ -38,7 +37,6 @@ export interface InterpreterOptions {
   config: RuntimeConfigView;
   requestIntervention: (req: InterventionRequest) => Promise<InterventionDecision>;
   signal: AbortSignal;
-  onEvent?: (event: KernelEvent) => void;
 }
 
 export class PipelineInterpreter {
@@ -54,7 +52,10 @@ export class PipelineInterpreter {
     this.instructionQueue.push(text);
   }
 
-  async run(): Promise<{ status: "completed" | "failed" | "aborted"; error?: string }> {
+  async run(): Promise<{
+    status: "completed" | "failed" | "aborted" | "suspended";
+    error?: string;
+  }> {
     const { events, store, taskId, pipeline } = this.opts;
 
     await events.emit("task.started", {});
@@ -68,6 +69,11 @@ export class PipelineInterpreter {
       store.updateTask(taskId, { status: "completed", current_node: null });
       return { status: "completed" };
     } catch (err) {
+      if (err instanceof SuspendedError) {
+        // Status already set to suspended by the throw site; do not overwrite to failed.
+        await events.emit("task.suspended", { reason: err.message });
+        return { status: "suspended", error: err.message };
+      }
       if (this.opts.signal.aborted) {
         await events.emit("task.aborted", {});
         store.updateTask(taskId, { status: "aborted" });
@@ -97,16 +103,30 @@ export class PipelineInterpreter {
       }
 
       const result = await this.runNode(step.nodeId);
-      if (step.onFail && result.outcome.passed === false) {
+
+      // Command/verify-style failure: `outcome.failures` is present. Review `passed:false`
+      // is a normal outcome and must not stop the flow.
+      const commandFailed =
+        result.outcome.passed === false && Array.isArray(result.outcome.failures);
+
+      if (commandFailed && step.onFail) {
         // Controlled jump back into a named loop — re-execute from that loop step
         const targetIndex = flow.findIndex(
           (s) => s.kind === "loop" && s.id === step.onFail!.goto,
         );
         if (targetIndex < 0) throw new Error(`onFail target not found: ${step.onFail.goto}`);
+        const targetLoop = flow[targetIndex] as Extract<FlowStep, { kind: "loop" }>;
         // Inject failure as review comment artifact for fix cycle
         if (step.onFail.asComment) {
           const failures = (result.outcome.failures as unknown[]) ?? [];
-          await this.opts.artifacts.writeJson("reviewComments", {
+          const reviewNodeId =
+            targetLoop.body.find(
+              (id) => this.opts.pipeline.nodes[id]?.type === "review",
+            ) ?? targetLoop.body[0]!;
+          const reviewOut =
+            (this.opts.pipeline.nodes[reviewNodeId]?.outputs ?? ["reviewComments"])[0] ??
+            "reviewComments";
+          await this.opts.artifacts.writeJson(reviewOut, {
             passed: false,
             summary: "verify failed",
             comments: failures.map((f, idx) => ({
@@ -116,10 +136,17 @@ export class PipelineInterpreter {
               status: "open",
             })),
           });
-          this.nodeOutcomes.codeReview = { passed: false };
+          this.nodeOutcomes[reviewNodeId] = { passed: false };
         }
         i = targetIndex;
         continue;
+      }
+
+      if (commandFailed) {
+        const failures = result.outcome.failures as unknown[];
+        throw new Error(
+          `Node ${step.nodeId} failed with no onFail handler: ${JSON.stringify(failures)}`,
+        );
       }
 
       // Gate reject: stop with failure for M1 (full re-entry in M2)
@@ -143,8 +170,11 @@ export class PipelineInterpreter {
         loop_state: JSON.stringify(Object.fromEntries(this.loopStack.map((e) => [e.loopId, e.iteration]))),
       });
 
+      // Run body nodes; stop early once `until` is satisfied so e.g.
+      // [codeReview, fixReview] skips fixReview when review already passed.
       for (const nodeId of step.body) {
         await this.runNode(nodeId);
+        if (evaluateExpression(step.until, this.nodeOutcomes)) break;
       }
 
       this.loopStack.pop();
@@ -153,14 +183,25 @@ export class PipelineInterpreter {
       if (passed) return;
     }
 
+    const summary = `Loop ${step.id} reached maxIterations=${step.maxIterations}`;
     await this.opts.events.emit("intervention.required", {
       requestId: `limit-${step.id}`,
       nodeId: step.id,
       kind: "limit",
-      summary: `Loop ${step.id} reached maxIterations=${step.maxIterations}`,
+      summary,
     });
     this.opts.store.updateTask(this.opts.taskId, { status: "suspended" });
-    throw new Error(`Loop ${step.id} exceeded maxIterations`);
+    try {
+      await this.opts.requestIntervention({
+        requestId: `limit-${step.id}`,
+        nodeId: step.id,
+        kind: "limit",
+        summary,
+      });
+    } catch {
+      // No handler / rejected — remain suspended.
+    }
+    throw new SuspendedError(summary);
   }
 
   private async runNode(nodeId: string) {
@@ -210,8 +251,7 @@ export class PipelineInterpreter {
       config: this.opts.config,
       signal: this.opts.signal,
       emit: async (event) => {
-        const e = await this.opts.events.emit(event.type, event.payload);
-        this.opts.onEvent?.(e);
+        await this.opts.events.emit(event.type, event.payload);
       },
       requestIntervention: async (req) => {
         await this.opts.events.emit("intervention.required", req);
@@ -266,7 +306,14 @@ export class PipelineInterpreter {
     if (!engineConf) throw new Error(`No engine config for: ${engineKey}`);
 
     const type = resolveEngineType(engineConf.type);
-    const cacheKey = `${engineKey}:${type}:${spec.readonly ? "ro" : "rw"}`;
+    const artifactWriteOnly =
+      spec.type === "review" ||
+      (spec.type === "agent" &&
+        (spec.promptTemplate === "plan" || (spec.outputs ?? []).includes("planDoc")));
+    const readonly = artifactWriteOnly
+      ? true
+      : (spec.readonly ?? spec.type === "review");
+    const cacheKey = `${engineKey}:${type}:${artifactWriteOnly ? "artifact" : readonly ? "ro" : "rw"}`;
     const existing = this.sessions.get(cacheKey);
     if (existing) return existing;
 
@@ -274,8 +321,10 @@ export class PipelineInterpreter {
     const session = await adapter.createSession({
       cwd: this.opts.worktree.worktreePath,
       model: engineConf.model,
-      readonly: spec.readonly ?? spec.type === "review",
+      readonly,
+      artifactWriteOnly,
       nodeTimeoutMs: this.opts.config.budget.nodeTimeoutMinutes * 60_000,
+      signal: this.opts.signal,
     });
     this.sessions.set(cacheKey, session);
     return session;
