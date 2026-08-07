@@ -17,6 +17,7 @@ export interface TaskRow {
   repo_path: string;
   worktree_path: string;
   branch: string;
+  base_commit: string;
   pipeline_name: string;
   pipeline_hash: string;
   status: TaskStatus;
@@ -34,6 +35,12 @@ export interface CheckpointRow {
   head_commit: string;
   engine_session_id: string | null;
   instructions: string;
+  /** JSON: { flowIndex: number } — position in top-level flow */
+  flow_cursor: string;
+  /** JSON: Record<nodeId, outcome> */
+  node_outcomes: string;
+  /** JSON: InterventionRequest | null */
+  pending_intervention: string | null;
   updated_at: string;
 }
 
@@ -51,6 +58,7 @@ export class KernelStore {
         repo_path TEXT NOT NULL,
         worktree_path TEXT NOT NULL,
         branch TEXT NOT NULL,
+        base_commit TEXT NOT NULL DEFAULT '',
         pipeline_name TEXT NOT NULL,
         pipeline_hash TEXT NOT NULL,
         status TEXT NOT NULL,
@@ -67,6 +75,9 @@ export class KernelStore {
         head_commit TEXT NOT NULL,
         engine_session_id TEXT,
         instructions TEXT NOT NULL,
+        flow_cursor TEXT NOT NULL DEFAULT '{"flowIndex":0}',
+        node_outcomes TEXT NOT NULL DEFAULT '{}',
+        pending_intervention TEXT,
         updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS usage (
@@ -80,6 +91,35 @@ export class KernelStore {
         ts TEXT NOT NULL
       );
     `);
+    this.migrateSchema();
+  }
+
+  private migrateSchema(): void {
+    const taskCols = this.db
+      .prepare(`PRAGMA table_info(tasks)`)
+      .all() as unknown as Array<{ name: string }>;
+    const taskNames = new Set(taskCols.map((c) => c.name));
+    if (!taskNames.has("base_commit")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN base_commit TEXT NOT NULL DEFAULT ''`);
+    }
+
+    const cols = this.db
+      .prepare(`PRAGMA table_info(checkpoints)`)
+      .all() as unknown as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has("flow_cursor")) {
+      this.db.exec(
+        `ALTER TABLE checkpoints ADD COLUMN flow_cursor TEXT NOT NULL DEFAULT '{"flowIndex":0}'`,
+      );
+    }
+    if (!names.has("node_outcomes")) {
+      this.db.exec(
+        `ALTER TABLE checkpoints ADD COLUMN node_outcomes TEXT NOT NULL DEFAULT '{}'`,
+      );
+    }
+    if (!names.has("pending_intervention")) {
+      this.db.exec(`ALTER TABLE checkpoints ADD COLUMN pending_intervention TEXT`);
+    }
   }
 
   close(): void {
@@ -90,10 +130,10 @@ export class KernelStore {
     this.db
       .prepare(
         `INSERT INTO tasks (
-          id, requirement, repo_path, worktree_path, branch,
+          id, requirement, repo_path, worktree_path, branch, base_commit,
           pipeline_name, pipeline_hash, status, current_node, loop_state,
           error, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -101,6 +141,7 @@ export class KernelStore {
         row.repo_path,
         row.worktree_path,
         row.branch,
+        row.base_commit,
         row.pipeline_name,
         row.pipeline_hash,
         row.status,
@@ -142,14 +183,18 @@ export class KernelStore {
     this.db
       .prepare(
         `INSERT INTO checkpoints (
-          task_id, node_id, loop_stack, head_commit, engine_session_id, instructions, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          task_id, node_id, loop_stack, head_commit, engine_session_id, instructions,
+          flow_cursor, node_outcomes, pending_intervention, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(task_id) DO UPDATE SET
           node_id=excluded.node_id,
           loop_stack=excluded.loop_stack,
           head_commit=excluded.head_commit,
           engine_session_id=excluded.engine_session_id,
           instructions=excluded.instructions,
+          flow_cursor=excluded.flow_cursor,
+          node_outcomes=excluded.node_outcomes,
+          pending_intervention=excluded.pending_intervention,
           updated_at=excluded.updated_at`,
       )
       .run(
@@ -159,6 +204,9 @@ export class KernelStore {
         row.head_commit,
         row.engine_session_id,
         row.instructions,
+        row.flow_cursor,
+        row.node_outcomes,
+        row.pending_intervention,
         row.updated_at,
       );
   }

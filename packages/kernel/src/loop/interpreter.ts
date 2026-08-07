@@ -4,6 +4,7 @@ import type {
   InterventionRequest,
   LoopStackEntry,
   NodeSpec,
+  ReviewComment,
 } from "@devtools/shared";
 import { SuspendedError, type EngineAdapter, type EngineSession } from "../engines/adapter.js";
 import { getEngineAdapter, resolveEngineType } from "../engines/registry.js";
@@ -26,6 +27,17 @@ const runners: Record<string, NodeRunner> = {
   commit: new CommitNodeRunner(),
 };
 
+export type AbortIntent = "none" | "pause" | "abort";
+
+export interface ResumeState {
+  flowIndex: number;
+  loopStack: LoopStackEntry[];
+  nodeOutcomes: Record<string, Record<string, unknown>>;
+  /** Re-run this node (and continue); for loop bodies, loopStack already set. */
+  resumeNodeId: string;
+  instructions: string[];
+}
+
 export interface InterpreterOptions {
   taskId: string;
   requirement: string;
@@ -37,6 +49,11 @@ export interface InterpreterOptions {
   config: RuntimeConfigView;
   requestIntervention: (req: InterventionRequest) => Promise<InterventionDecision>;
   signal: AbortSignal;
+  /** Shared mutable abort intent (set by TaskHandle before aborting signal). */
+  getAbortIntent: () => AbortIntent;
+  resume?: ResumeState;
+  /** Called whenever instruction queue should be drained from external source. */
+  pullInstructions?: () => string[];
 }
 
 export class PipelineInterpreter {
@@ -45,8 +62,19 @@ export class PipelineInterpreter {
   private engineCalls = 0;
   private sessions = new Map<string, EngineSession>();
   private instructionQueue: string[] = [];
+  private flowIndex = 0;
+  /** When set, next runFlow iteration should start by running this node inside current step. */
+  private resumeNodeId: string | null = null;
 
-  constructor(private readonly opts: InterpreterOptions) {}
+  constructor(private readonly opts: InterpreterOptions) {
+    if (opts.resume) {
+      this.flowIndex = opts.resume.flowIndex;
+      this.loopStack = [...opts.resume.loopStack];
+      this.nodeOutcomes = { ...opts.resume.nodeOutcomes };
+      this.instructionQueue = [...opts.resume.instructions];
+      this.resumeNodeId = opts.resume.resumeNodeId;
+    }
+  }
 
   injectInstruction(text: string): void {
     this.instructionQueue.push(text);
@@ -58,7 +86,14 @@ export class PipelineInterpreter {
   }> {
     const { events, store, taskId, pipeline } = this.opts;
 
-    await events.emit("task.started", {});
+    if (!this.opts.resume) {
+      await events.emit("task.started", {});
+    } else {
+      await events.emit("task.resumed", {
+        nodeId: this.opts.resume.resumeNodeId,
+        flowIndex: this.opts.resume.flowIndex,
+      });
+    }
     store.updateTask(taskId, { status: "running" });
 
     try {
@@ -70,11 +105,10 @@ export class PipelineInterpreter {
       return { status: "completed" };
     } catch (err) {
       if (err instanceof SuspendedError) {
-        // Status already set to suspended by the throw site; do not overwrite to failed.
         await events.emit("task.suspended", { reason: err.message });
         return { status: "suspended", error: err.message };
       }
-      if (this.opts.signal.aborted) {
+      if (this.opts.getAbortIntent() === "abort" || this.opts.signal.aborted) {
         await events.emit("task.aborted", {});
         store.updateTask(taskId, { status: "aborted" });
         return { status: "aborted" };
@@ -90,34 +124,52 @@ export class PipelineInterpreter {
     }
   }
 
+  private throwIfAborted(): void {
+    if (!this.opts.signal.aborted) return;
+    const intent = this.opts.getAbortIntent();
+    if (intent === "pause") {
+      this.opts.store.updateTask(this.opts.taskId, { status: "suspended" });
+      throw new SuspendedError("paused");
+    }
+    throw new Error("aborted");
+  }
+
   private async runFlow(flow: FlowStep[]): Promise<void> {
-    let i = 0;
+    let i = this.flowIndex;
     while (i < flow.length) {
-      if (this.opts.signal.aborted) throw new Error("aborted");
+      this.throwIfAborted();
+      this.flowIndex = i;
       const step = flow[i]!;
 
       if (step.kind === "loop") {
-        await this.runLoop(step);
+        await this.runLoop(step, i);
+        this.resumeNodeId = null;
         i += 1;
         continue;
       }
 
-      const result = await this.runNode(step.nodeId);
+      // Gate / single node
+      if (this.resumeNodeId && this.resumeNodeId !== step.nodeId) {
+        // Resume pointed at a different node — ignore and run current
+        this.resumeNodeId = null;
+      }
+      this.resumeNodeId = null;
 
-      // Command/verify-style failure: `outcome.failures` is present. Review `passed:false`
-      // is a normal outcome and must not stop the flow.
+      const result = await this.runNode(step.nodeId, i);
+
       const commandFailed =
         result.outcome.passed === false && Array.isArray(result.outcome.failures);
 
-      if (commandFailed && step.onFail) {
-        // Controlled jump back into a named loop — re-execute from that loop step
+      const onFail =
+        step.onFail ?? this.opts.pipeline.nodes[step.nodeId]?.onFail ?? undefined;
+
+      if (commandFailed && onFail) {
         const targetIndex = flow.findIndex(
-          (s) => s.kind === "loop" && s.id === step.onFail!.goto,
+          (s) => s.kind === "loop" && s.id === onFail.goto,
         );
-        if (targetIndex < 0) throw new Error(`onFail target not found: ${step.onFail.goto}`);
+        if (targetIndex < 0) throw new Error(`onFail target not found: ${onFail.goto}`);
         const targetLoop = flow[targetIndex] as Extract<FlowStep, { kind: "loop" }>;
-        // Inject failure as review comment artifact for fix cycle
-        if (step.onFail.asComment) {
+        if (onFail.asComment) {
           const failures = (result.outcome.failures as unknown[]) ?? [];
           const reviewNodeId =
             targetLoop.body.find(
@@ -131,7 +183,7 @@ export class PipelineInterpreter {
             summary: "verify failed",
             comments: failures.map((f, idx) => ({
               id: `verify-${idx}`,
-              severity: step.onFail!.asComment,
+              severity: onFail.asComment,
               comment: JSON.stringify(f),
               status: "open",
             })),
@@ -149,17 +201,66 @@ export class PipelineInterpreter {
         );
       }
 
-      // Gate reject: stop with failure for M1 (full re-entry in M2)
+      // Gate reject → re-enter nearest preceding loop (usually planLoop)
       if (result.outcome.rejected === true) {
-        throw new Error("Gate rejected by human");
+        const comments = (result.outcome.comments as ReviewComment[] | undefined) ?? [];
+        const targetIndex = findPrecedingLoopIndex(flow, i);
+        if (targetIndex < 0) {
+          throw new Error("Gate rejected and no preceding loop to re-enter");
+        }
+        const targetLoop = flow[targetIndex] as Extract<FlowStep, { kind: "loop" }>;
+        const reviewNodeId =
+          targetLoop.body.find((id) => this.opts.pipeline.nodes[id]?.type === "review") ??
+          targetLoop.body[targetLoop.body.length - 1]!;
+        const outKey =
+          (this.opts.pipeline.nodes[reviewNodeId]?.outputs ?? ["planComments"])[0] ??
+          "planComments";
+        await this.opts.artifacts.writeJson(outKey, {
+          passed: false,
+          summary: "Rejected at gate",
+          comments: comments.length
+            ? comments
+            : [
+                {
+                  id: "gate-reject",
+                  severity: "major",
+                  comment: "Plan rejected at approval gate",
+                  status: "open",
+                },
+              ],
+        });
+        this.nodeOutcomes[reviewNodeId] = { passed: false };
+        // Feed reject comments into instruction queue for next plan turn
+        if (comments.length) {
+          this.instructionQueue.push(
+            `Gate rejected with comments:\n${comments.map((c) => `- [${c.severity}] ${c.comment}`).join("\n")}`,
+          );
+        }
+        i = targetIndex;
+        continue;
       }
 
       i += 1;
     }
   }
 
-  private async runLoop(step: Extract<FlowStep, { kind: "loop" }>): Promise<void> {
-    for (let iteration = 1; iteration <= step.maxIterations; iteration++) {
+  private async runLoop(
+    step: Extract<FlowStep, { kind: "loop" }>,
+    flowIndex: number,
+  ): Promise<void> {
+    // If resuming inside this loop, restore iteration from stack
+    let startIteration = 1;
+    if (this.resumeNodeId && this.loopStack.some((e) => e.loopId === step.id)) {
+      const entry = this.loopStack.find((e) => e.loopId === step.id)!;
+      startIteration = entry.iteration;
+      // Remove from stack; will re-push below
+      this.loopStack = this.loopStack.filter((e) => e.loopId !== step.id);
+    } else if (this.resumeNodeId && !this.loopStack.some((e) => e.loopId === step.id)) {
+      // Resuming into this loop fresh at current resume node
+      startIteration = 1;
+    }
+
+    for (let iteration = startIteration; iteration <= step.maxIterations; iteration++) {
       this.loopStack.push({ loopId: step.id, iteration });
       await this.opts.events.emit("loop.iteration", {
         loopId: step.id,
@@ -167,13 +268,23 @@ export class PipelineInterpreter {
         maxIterations: step.maxIterations,
       });
       this.opts.store.updateTask(this.opts.taskId, {
-        loop_state: JSON.stringify(Object.fromEntries(this.loopStack.map((e) => [e.loopId, e.iteration]))),
+        loop_state: JSON.stringify(
+          Object.fromEntries(this.loopStack.map((e) => [e.loopId, e.iteration])),
+        ),
       });
 
-      // Run body nodes; stop early once `until` is satisfied so e.g.
-      // [codeReview, fixReview] skips fixReview when review already passed.
-      for (const nodeId of step.body) {
-        await this.runNode(nodeId);
+      let bodyStart = 0;
+      if (this.resumeNodeId) {
+        const idx = step.body.indexOf(this.resumeNodeId);
+        if (idx >= 0) {
+          bodyStart = idx;
+          this.resumeNodeId = null;
+        }
+      }
+
+      for (let b = bodyStart; b < step.body.length; b++) {
+        const nodeId = step.body[b]!;
+        await this.runNode(nodeId, flowIndex);
         if (evaluateExpression(step.until, this.nodeOutcomes)) break;
       }
 
@@ -204,12 +315,14 @@ export class PipelineInterpreter {
     throw new SuspendedError(summary);
   }
 
-  private async runNode(nodeId: string) {
+  private async runNode(nodeId: string, flowIndex: number) {
     const spec = this.opts.pipeline.nodes[nodeId];
     if (!spec) throw new Error(`Unknown node: ${nodeId}`);
 
     const runner = runners[spec.type];
     if (!runner) throw new Error(`No runner for primitive: ${spec.type}`);
+
+    this.throwIfAborted();
 
     this.opts.store.updateTask(this.opts.taskId, { current_node: nodeId });
     await this.opts.events.emit("node.started", {
@@ -226,9 +339,17 @@ export class PipelineInterpreter {
       head_commit: head,
       engine_session_id: null,
       instructions: JSON.stringify(this.instructionQueue),
+      flow_cursor: JSON.stringify({ flowIndex }),
+      node_outcomes: JSON.stringify(this.nodeOutcomes),
+      pending_intervention: null,
       updated_at: new Date().toISOString(),
     });
 
+    if (this.opts.pullInstructions) {
+      for (const text of this.opts.pullInstructions()) {
+        this.instructionQueue.push(text);
+      }
+    }
     const instructions = this.instructionQueue.splice(0, this.instructionQueue.length);
     const engine = await this.maybeSession(spec);
 
@@ -256,15 +377,41 @@ export class PipelineInterpreter {
       requestIntervention: async (req) => {
         await this.opts.events.emit("intervention.required", req);
         this.opts.store.updateTask(this.opts.taskId, { status: "suspended" });
-        const decision = await this.opts.requestIntervention(req);
-        this.opts.store.updateTask(this.opts.taskId, { status: "running" });
-        return decision;
+        // Persist pending intervention on checkpoint for serve/CLI discovery
+        const cp = this.opts.store.getCheckpoint(this.opts.taskId);
+        if (cp) {
+          this.opts.store.saveCheckpoint({
+            ...cp,
+            pending_intervention: JSON.stringify(req),
+            updated_at: new Date().toISOString(),
+          });
+        }
+        try {
+          const decision = await this.opts.requestIntervention(req);
+          this.opts.store.updateTask(this.opts.taskId, { status: "running" });
+          if (cp) {
+            this.opts.store.saveCheckpoint({
+              ...cp,
+              pending_intervention: null,
+              updated_at: new Date().toISOString(),
+            });
+          }
+          return decision;
+        } catch (err) {
+          // If paused/aborted while waiting, surface as suspend
+          if (this.opts.getAbortIntent() === "pause") {
+            throw new SuspendedError("paused while waiting for intervention");
+          }
+          throw err;
+        }
       },
     };
 
     let lastError: unknown;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
+        this.throwIfAborted();
+
         if (spec.type === "agent" || spec.type === "review") {
           this.engineCalls += 1;
           if (this.engineCalls > this.opts.config.budget.maxEngineCalls) {
@@ -274,6 +421,7 @@ export class PipelineInterpreter {
         }
 
         const result = await runner.run(spec, ctx);
+        this.throwIfAborted();
         this.nodeOutcomes[nodeId] = result.outcome;
         await this.opts.events.emit("node.completed", {
           nodeId,
@@ -282,6 +430,17 @@ export class PipelineInterpreter {
         });
         return result;
       } catch (err) {
+        if (err instanceof SuspendedError) throw err;
+        if (this.opts.getAbortIntent() === "pause" || this.opts.signal.aborted) {
+          // Roll back worktree to checkpoint on pause
+          try {
+            await this.opts.worktree.resetHard(head);
+          } catch {
+            // best effort
+          }
+          this.opts.store.updateTask(this.opts.taskId, { status: "suspended" });
+          throw new SuspendedError("paused");
+        }
         lastError = err;
         if (attempt < 2) {
           await this.opts.events.emit("node.retrying", {
@@ -329,4 +488,11 @@ export class PipelineInterpreter {
     this.sessions.set(cacheKey, session);
     return session;
   }
+}
+
+function findPrecedingLoopIndex(flow: FlowStep[], fromIndex: number): number {
+  for (let i = fromIndex - 1; i >= 0; i--) {
+    if (flow[i]!.kind === "loop") return i;
+  }
+  return -1;
 }

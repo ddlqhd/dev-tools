@@ -1,0 +1,13 @@
+version: 1
+pipeline: review-only
+
+# 对当前 worktree / 分支做一轮 AI 代码评审（不修改代码、不提交）
+nodes:
+  codeReview:
+    type: review
+    engine: reviewer
+    severityGate: major
+    outputs: [reviewComments]
+
+flow:
+  - codeReview

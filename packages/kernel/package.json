@@ -17,11 +17,13 @@
   },
   "dependencies": {
     "@devtools/shared": "workspace:*",
+    "ws": "^8.18.1",
     "yaml": "^2.7.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
+    "@types/ws": "^8.18.0",
     "typescript": "^5.8.2"
   }
 }

@@ -5,7 +5,7 @@ import { z } from "zod";
 
 export const CodeloopConfigSchema = z.object({
   version: z.literal(1),
-  pipeline: z.string().default("m1-minimal"),
+  pipeline: z.string().default("default-codeloop"),
   pipelineOverrides: z.record(z.unknown()).optional(),
   engines: z
     .record(
@@ -37,7 +37,7 @@ export const CodeloopConfigSchema = z.object({
 export type CodeloopConfig = z.infer<typeof CodeloopConfigSchema>;
 
 export const DEFAULT_CONFIG_YAML = `version: 1
-pipeline: m1-minimal
+pipeline: default-codeloop
 engines:
   default:
     type: cursor

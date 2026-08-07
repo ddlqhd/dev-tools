@@ -1,0 +1,28 @@
+version: 1
+pipeline: plan-only
+
+# 方案先行：计划回环 + 人工审批，不编码
+nodes:
+  plan:
+    type: agent
+    engine: default
+    readonly: true
+    promptTemplate: plan
+    outputs: [planDoc]
+  planReview:
+    type: review
+    engine: reviewer
+    inputs: [planDoc]
+    outputs: [planComments]
+    severityGate: major
+  planGate:
+    type: gate
+    timeout: 24h
+
+flow:
+  - loop:
+      id: planLoop
+      maxIterations: 3
+      body: [plan, planReview]
+      until: planReview.passed
+  - planGate

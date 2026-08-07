@@ -9,3 +9,12 @@ export { PipelineInterpreter } from "./loop/interpreter.js";
 export { KernelStore, EventLog, ArtifactStore } from "./store/index.js";
 export type { EngineAdapter, EngineSession, EngineInfo } from "./engines/adapter.js";
 export { SuspendedError } from "./engines/adapter.js";
+export { KernelRuntime, TaskHandle } from "./runtime/kernel-runtime.js";
+export type {
+  CreateTaskOptions,
+  TaskSnapshotView,
+  ApplyInterventionOptions,
+  ApplyInterventionResult,
+} from "./runtime/kernel-runtime.js";
+export { startKernelServer, readKernelLock } from "./server/http-server.js";
+export type { ServeOptions, ServeHandle } from "./server/http-server.js";
