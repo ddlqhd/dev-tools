@@ -193,7 +193,25 @@ async function commitWithAuthor(
   ]);
 }
 
-export function git(cwd: string, args: string[]): Promise<string> {
+export async function git(cwd: string, args: string[], attempts = 5): Promise<string> {
+  let lastErr: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await gitOnce(cwd, args);
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/index\.lock/i.test(msg) && i < attempts) {
+        await new Promise((r) => setTimeout(r, 200 * i));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
+function gitOnce(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd,

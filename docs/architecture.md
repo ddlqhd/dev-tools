@@ -210,7 +210,7 @@ dev-tools/
 |---|---|---|
 | M1 | 内核最小闭环 | `codeloop run` 跑通 plan → code → commit（评审先用 AI 单轮）；内部已按节点原语实现，但只跑内置流程；单引擎（先接一个 CLI） |
 | M2 | 完整 codeloop + 编排 + 人工介入 | ✓ 计划/代码评审回环、审批门、pause/resume、`codeloop serve` 事件流；预置模板（quick-fix / plan-only / review-only / m1-minimal） |
-| M3 | 管理系统最小版 | 调度器 + GitHub Adapter（拉 issue、开 PR、评论进度）+ 控制台任务列表/详情 |
+| M3 | 管理系统最小版 | ✓ 调度器 + GitHub PAT Adapter（拉 issue、开 PR、评论进度）+ 控制台任务看板/详情 |
 | M4 | 强化 | 多引擎、失败恢复、容器化 Launcher、GitLab/Gitee Adapter |
 
 ---

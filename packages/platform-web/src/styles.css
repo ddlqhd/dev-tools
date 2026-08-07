@@ -1,0 +1,646 @@
+/* GitHub Primer-style design tokens */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas-default: #0d1117;
+  --canvas-subtle: #161b22;
+  --canvas-inset: #010409;
+  --border-default: #30363d;
+  --border-muted: #21262d;
+  --fg-default: #e6edf3;
+  --fg-muted: #7d8590;
+  --fg-onemphasis: #ffffff;
+  --accent-fg: #58a6ff;
+  --accent-emphasis: #1f6feb;
+  --success-fg: #3fb950;
+  --success-emphasis: #238636;
+  --danger-fg: #f85149;
+  --danger-emphasis: #da3633;
+  --attention-fg: #d29922;
+  --attention-emphasis: #9e6a03;
+  --btn-bg: #21262d;
+  --btn-hover-bg: #30363d;
+  --btn-border: rgba(240, 246, 252, 0.1);
+  --btn-primary-bg: #238636;
+  --btn-primary-hover: #2ea043;
+  --shadow-small: 0 1px 0 rgba(1, 4, 9, 0.6);
+  --shadow-medium: 0 3px 6px rgba(1, 4, 9, 0.5);
+  --header-bg: #010409;
+  --header-fg: #e6edf3;
+  --header-muted: #7d8590;
+  --counter-bg: rgba(110, 118, 129, 0.4);
+  --control-bg: #0d1117;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --canvas-default: #ffffff;
+  --canvas-subtle: #f6f8fa;
+  --canvas-inset: #f6f8fa;
+  --border-default: #d1d9e0;
+  --border-muted: #d1d9e080;
+  --fg-default: #1f2328;
+  --fg-muted: #59636e;
+  --fg-onemphasis: #ffffff;
+  --accent-fg: #0969da;
+  --accent-emphasis: #0969da;
+  --success-fg: #1a7f37;
+  --success-emphasis: #1f883d;
+  --danger-fg: #d1242f;
+  --danger-emphasis: #cf222e;
+  --attention-fg: #9a6700;
+  --attention-emphasis: #9a6700;
+  --btn-bg: #f6f8fa;
+  --btn-hover-bg: #eff1f3;
+  --btn-border: rgba(31, 35, 40, 0.15);
+  --btn-primary-bg: #1f883d;
+  --btn-primary-hover: #1a7f37;
+  --shadow-small: 0 1px 0 rgba(31, 35, 40, 0.04);
+  --shadow-medium: 0 3px 6px rgba(140, 149, 159, 0.15);
+  --header-bg: #f6f8fa;
+  --header-fg: #1f2328;
+  --header-muted: #59636e;
+  --counter-bg: rgba(31, 35, 40, 0.08);
+  --control-bg: #ffffff;
+}
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica,
+    Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--fg-default);
+  background: var(--canvas-default);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--canvas-default);
+  color: var(--fg-default);
+}
+
+a {
+  color: var(--accent-fg);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+code,
+pre {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+code {
+  background: var(--counter-bg);
+  border-radius: 6px;
+  padding: 0.2em 0.4em;
+  font-size: 85%;
+}
+
+/* Layout */
+.container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+/* Header (GitHub top bar) */
+.Header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.Header-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--header-fg);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 4px 8px 4px 4px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.Header-logo:hover {
+  text-decoration: none;
+  background: var(--btn-bg);
+}
+
+.Header-logo svg {
+  display: block;
+}
+
+.Header nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.Header-link {
+  color: var(--header-muted);
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.Header-link:hover {
+  color: var(--header-fg);
+  text-decoration: none;
+  background: var(--btn-bg);
+}
+
+.Header-link.active {
+  color: var(--header-fg);
+  font-weight: 600;
+}
+
+.theme-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.theme-toggle button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--header-muted);
+  cursor: pointer;
+}
+
+.theme-toggle button:hover {
+  color: var(--header-fg);
+}
+
+.theme-toggle button.active {
+  background: var(--btn-bg);
+  color: var(--header-fg);
+}
+
+/* Box (Primer panel) */
+.Box {
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.Box-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--canvas-subtle);
+  border-bottom: 1px solid var(--border-default);
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+
+.Box-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.Box-body {
+  padding: 16px;
+}
+
+/* Buttons */
+.btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--fg-default);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 20px;
+  cursor: pointer;
+  box-shadow: var(--shadow-small);
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--btn-hover-bg);
+  border-color: var(--border-default);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--btn-primary-bg);
+  border-color: rgba(240, 246, 252, 0.1);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--btn-primary-hover);
+  border-color: rgba(240, 246, 252, 0.1);
+}
+
+.btn-danger {
+  color: var(--danger-fg);
+}
+
+.btn-danger:hover {
+  background: var(--danger-emphasis);
+  border-color: var(--danger-emphasis);
+  color: #fff;
+}
+
+/* Forms */
+input,
+textarea,
+select {
+  background: var(--control-bg);
+  border: 1px solid var(--border-default);
+  color: var(--fg-default);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  box-shadow: var(--shadow-small);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent-emphasis);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-emphasis) 30%, transparent);
+}
+
+textarea {
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-default);
+  flex: 1;
+  min-width: 160px;
+}
+
+/* Label (issue-label pill) */
+.Label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  padding: 0 7px;
+  border-radius: 2em;
+  border: 1px solid var(--border-default);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.Label--accent {
+  color: var(--accent-fg);
+  border-color: color-mix(in srgb, var(--accent-fg) 50%, transparent);
+}
+
+.Label--success {
+  color: var(--success-fg);
+  border-color: color-mix(in srgb, var(--success-fg) 50%, transparent);
+}
+
+.Label--danger {
+  color: var(--danger-fg);
+  border-color: color-mix(in srgb, var(--danger-fg) 50%, transparent);
+}
+
+.Label--attention {
+  color: var(--attention-fg);
+  border-color: color-mix(in srgb, var(--attention-fg) 50%, transparent);
+}
+
+/* State (issue state badge with dot) */
+.State {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  padding: 3px 12px;
+  border-radius: 2em;
+  color: #fff;
+  background: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.State::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  filter: brightness(0) invert(1);
+  opacity: 0.9;
+}
+
+.State--open,
+.State--running {
+  background: var(--accent-emphasis);
+}
+
+.State--waiting {
+  background: var(--attention-emphasis);
+}
+
+.State--done {
+  background: var(--success-emphasis);
+}
+
+.State--failed {
+  background: var(--danger-emphasis);
+}
+
+.State--queued {
+  background: var(--fg-muted);
+}
+
+/* Counter pill */
+.Counter {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 2em;
+  background: var(--counter-bg);
+  color: var(--fg-default);
+}
+
+/* Board (GitHub Projects) */
+.board {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .board {
+    grid-template-columns: 1fr;
+  }
+}
+
+.board-column {
+  background: var(--canvas-subtle);
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  min-height: 200px;
+  padding: 8px;
+}
+
+.board-column h3 {
+  margin: 0;
+  padding: 6px 8px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-default);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.board-card {
+  display: block;
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  color: inherit;
+  box-shadow: var(--shadow-small);
+}
+
+.board-card:hover {
+  border-color: var(--accent-fg);
+  box-shadow: var(--shadow-medium);
+  text-decoration: none;
+}
+
+.board-card .title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 6px;
+  line-height: 1.4;
+}
+
+.board-card .meta {
+  font-size: 12px;
+  color: var(--fg-muted);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Issue-style task header */
+.issue-title {
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.issue-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-muted);
+  font-size: 14px;
+  color: var(--fg-muted);
+}
+
+/* Timeline */
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  position: relative;
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--border-muted);
+}
+
+.timeline li {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0 6px 32px;
+  font-size: 14px;
+}
+
+.timeline .dot {
+  position: absolute;
+  left: 4px;
+  top: 10px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border-default);
+  background: var(--canvas-subtle);
+}
+
+.timeline .dot--success {
+  border-color: var(--success-fg);
+  background: var(--success-fg);
+}
+
+.timeline .dot--danger {
+  border-color: var(--danger-fg);
+  background: var(--danger-fg);
+}
+
+.timeline .dot--accent {
+  border-color: var(--accent-fg);
+  background: var(--accent-fg);
+}
+
+.timeline .dot--attention {
+  border-color: var(--attention-fg);
+  background: var(--attention-fg);
+}
+
+.timeline .ts {
+  color: var(--fg-muted);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* Utilities */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.muted {
+  color: var(--fg-muted);
+}
+
+.error {
+  color: var(--danger-fg);
+  white-space: pre-wrap;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Table */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+th {
+  color: var(--fg-muted);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+tbody tr:hover {
+  background: var(--canvas-subtle);
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+pre.artifact {
+  background: var(--canvas-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow: auto;
+  max-height: 360px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  margin: 0;
+}

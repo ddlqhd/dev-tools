@@ -8,6 +8,7 @@ dist/
 
 # Tooling / local state
 .codeloop/
+.platform/
 tmp/
 coverage/
 .turbo/
