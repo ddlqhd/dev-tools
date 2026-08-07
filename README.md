@@ -72,6 +72,8 @@ node packages/cli/dist/index.js serve --repo /path/to/repo --port 4700
 
 详见 CLI `--help`。预置 pipeline：`default-codeloop` / `m1-minimal` / `quick-fix` / `plan-only` / `review-only`。
 
+在 `.codeloop/config.yaml` 的 `engines` 下可为各阶段指定模型（`planner` / `planReviewer` / `coder` / `codeReviewer` / `fixer`），写作与评审用不同模型做交叉检视；也可用 `pipelineOverrides` 或节点上的 `model` 字段做单点覆盖。可用模型 id 见 `agent --list-models`。
+
 ### 打发布包
 
 ```bash

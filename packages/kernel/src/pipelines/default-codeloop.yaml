@@ -4,13 +4,13 @@ pipeline: default-codeloop
 nodes:
   plan:
     type: agent
-    engine: default
+    engine: planner
     readonly: true
     promptTemplate: plan
     outputs: [planDoc]
   planReview:
     type: review
-    engine: reviewer
+    engine: planReviewer
     inputs: [planDoc]
     outputs: [planComments]
     severityGate: major
@@ -19,17 +19,17 @@ nodes:
     timeout: 24h
   code:
     type: agent
-    engine: default
+    engine: coder
     inputs: [planDoc]
     promptTemplate: code
   codeReview:
     type: review
-    engine: reviewer
+    engine: codeReviewer
     severityGate: major
     outputs: [reviewComments]
   fixReview:
     type: agent
-    engine: default
+    engine: fixer
     inputs: [reviewComments]
     promptTemplate: fix
   verify:

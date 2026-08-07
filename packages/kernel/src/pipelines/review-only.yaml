@@ -5,7 +5,7 @@ pipeline: review-only
 nodes:
   codeReview:
     type: review
-    engine: reviewer
+    engine: codeReviewer
     severityGate: major
     outputs: [reviewComments]
 

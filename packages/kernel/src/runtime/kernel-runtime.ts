@@ -8,7 +8,12 @@ import type {
   LoopStackEntry,
   NodeSpec,
 } from "@devtools/shared";
-import { loadConfig, ensureCodeloopDir, type CodeloopConfig } from "../config.js";
+import {
+  getMissingEngineConfigs,
+  loadConfig,
+  ensureCodeloopDir,
+  type CodeloopConfig,
+} from "../config.js";
 import {
   loadPipeline,
   snapshotPipeline,
@@ -441,6 +446,14 @@ export class KernelRuntime {
     const pipelineName = opts.pipeline ?? config.pipeline;
     let pipeline = await loadPipeline(pipelineName, opts.repoPath);
     pipeline = applyPipelineOverrides(pipeline, config.pipelineOverrides);
+    const missingEngines = getMissingEngineConfigs(pipeline.nodes, config.engines);
+    if (missingEngines.length > 0) {
+      const known = Object.keys(config.engines).join(", ") || "(none)";
+      throw new Error(
+        `Missing engine config for: ${missingEngines.join(", ")}. Known engines: ${known}. ` +
+          `Add them under engines in .codeloop/config.yaml.`,
+      );
+    }
 
     const taskId = randomUUID().slice(0, 8);
     const dirs = await this.store.ensureTaskDirs(taskId);
@@ -594,7 +607,7 @@ function toRuntimeConfig(config: CodeloopConfig): RuntimeConfigView {
   };
 }
 
-function applyPipelineOverrides(
+export function applyPipelineOverrides(
   pipeline: LoadedPipeline,
   overrides: CodeloopConfig["pipelineOverrides"],
 ): LoadedPipeline {

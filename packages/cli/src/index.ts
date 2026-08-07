@@ -475,9 +475,13 @@ function printEvent(event: KernelEvent): void {
     case "task.aborted":
       console.log(`[task] aborted`);
       break;
-    case "node.started":
-      console.log(`[node] ▶ ${p.nodeId} (${p.primitive})`);
+    case "node.started": {
+      const engine = p.engine ? String(p.engine) : undefined;
+      const model = p.model ? String(p.model) : undefined;
+      const meta = [engine, model].filter(Boolean).join("/");
+      console.log(`[node] ▶ ${p.nodeId} (${p.primitive}${meta ? `, ${meta}` : ""})`);
       break;
+    }
     case "node.completed":
       console.log(`[node] ✓ ${p.nodeId}`);
       break;

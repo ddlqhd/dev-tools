@@ -2,10 +2,11 @@ import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { InterventionDecision, InterventionRequest, KernelEvent } from "@devtools/shared";
-import { loadConfig, ensureCodeloopDir } from "./config.js";
+import { getMissingEngineConfigs, loadConfig, ensureCodeloopDir } from "./config.js";
 import { KernelStore } from "./store/index.js";
 import { getEngineAdapter, resolveEngineType } from "./engines/registry.js";
-import { KernelRuntime } from "./runtime/kernel-runtime.js";
+import { loadPipeline } from "./pipeline/load.js";
+import { applyPipelineOverrides, KernelRuntime } from "./runtime/kernel-runtime.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -144,17 +145,56 @@ export async function doctor(repoPath?: string): Promise<{
   if (repoPath) {
     try {
       const config = await loadConfig(repoPath);
+      const engineSummary = Object.entries(config.engines)
+        .map(([name, conf]) => `${name}=${conf.type}${conf.model ? `/${conf.model}` : ""}`)
+        .join(", ");
       checks.push({
         name: "config",
         ok: true,
-        detail: `pipeline=${config.pipeline}, engine=${config.engines.default?.type}`,
+        detail: `pipeline=${config.pipeline}`,
       });
-      const engineType = resolveEngineType(config.engines.default?.type ?? "cursor");
       checks.push({
-        name: "default-engine",
-        ok: engineType === "cursor",
-        detail: engineType,
+        name: "engines",
+        ok: Object.keys(config.engines).length > 0,
+        detail: engineSummary || "(none)",
       });
+      try {
+        const pipeline = applyPipelineOverrides(
+          await loadPipeline(config.pipeline, repoPath),
+          config.pipelineOverrides,
+        );
+        const missingEngines = getMissingEngineConfigs(pipeline.nodes, config.engines);
+        checks.push({
+          name: "pipeline-engines",
+          ok: missingEngines.length === 0,
+          detail:
+            missingEngines.length === 0
+              ? `all engine configs present for ${pipeline.name}`
+              : `missing: ${missingEngines.join(", ")}`,
+        });
+      } catch (err) {
+        checks.push({
+          name: "pipeline-engines",
+          ok: false,
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      for (const [name, conf] of Object.entries(config.engines)) {
+        try {
+          const engineType = resolveEngineType(conf.type);
+          checks.push({
+            name: `engine:${name}`,
+            ok: engineType === "cursor",
+            detail: conf.model ? `${engineType} model=${conf.model}` : engineType,
+          });
+        } catch (err) {
+          checks.push({
+            name: `engine:${name}`,
+            ok: false,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
       await ensureCodeloopDir(repoPath);
     } catch (err) {
       checks.push({

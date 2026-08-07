@@ -90,12 +90,12 @@ version: 1
 pipeline: default-codeloop
 
 nodes:
-  plan:       { type: agent,  engine: default,  readonly: true, promptTemplate: plan, outputs: [planDoc] }
-  planReview: { type: review, engine: reviewer, inputs: [planDoc], outputs: [planComments] }
+  plan:       { type: agent,  engine: planner,       readonly: true, promptTemplate: plan, outputs: [planDoc] }
+  planReview: { type: review, engine: planReviewer,  inputs: [planDoc], outputs: [planComments] }
   planGate:   { type: gate,   timeout: 24h }
-  code:       { type: agent,  engine: default,  inputs: [planDoc], promptTemplate: code }
-  codeReview: { type: review, engine: reviewer, severityGate: major, outputs: [reviewComments] }
-  fixReview:  { type: agent,  engine: default,  inputs: [reviewComments], promptTemplate: fix }
+  code:       { type: agent,  engine: coder,         inputs: [planDoc], promptTemplate: code }
+  codeReview: { type: review, engine: codeReviewer,  severityGate: major, outputs: [reviewComments] }
+  fixReview:  { type: agent,  engine: fixer,         inputs: [reviewComments], promptTemplate: fix }
   verify:     { type: command, run: ["pnpm lint", "pnpm test"] }
   commit:     { type: commit, messageStyle: conventional }
 
@@ -179,12 +179,26 @@ pipeline: default-codeloop       # 引用内置模板或 .codeloop/pipelines/ �
 pipelineOverrides:               # 不改模板的轻量覆盖(仅允许节点参数, 不允许改 flow)
   planGate: { timeout: 4h }
   verify:   { run: ["pnpm lint", "pnpm test -- --changed"] }
+  # 也可按节点覆盖 model，优先级高于 engines[alias].model
+  # plan: { model: kimi-k3-max }
 engines:
-  default:
+  # 按阶段配置引擎与模型；可用 `agent --list-models` 查看 model id
+  # 写作与评审用不同模型，便于交叉检视
+  planner:
     type: cursor                 # cursor | claude-code | codex（cursor 启动命令为 agent）
-    model: sonnet
-  reviewer:
-    type: cursor                 # M1 可与编码同引擎; 后续可换引擎避免自审偏差
+    model: kimi-k3-max
+  planReviewer:
+    type: cursor
+    model: composer-2.5
+  coder:
+    type: cursor
+    model: composer-2.5
+  codeReviewer:
+    type: cursor
+    model: kimi-k3-max
+  fixer:
+    type: cursor
+    model: composer-2.5
 budget:
   maxEngineCalls: 60
   nodeTimeoutMinutes: 30
@@ -192,6 +206,18 @@ git:
   branchPrefix: codeloop/
   worktreeRoot: .codeloop/worktrees
 ```
+
+阶段别名与默认 pipeline 节点对应关系：
+
+| 别名 | 节点 | 用途 |
+|---|---|---|
+| `planner` | `plan` | 写方案（建议用强推理模型） |
+| `planReviewer` | `planReview` | 检视方案（建议与 planner 不同模型） |
+| `coder` | `code` | 按方案编码 |
+| `codeReviewer` | `codeReview` | 检视代码（建议与 coder 不同模型） |
+| `fixer` | `fixReview` | 按评审意见修复 |
+
+模型解析优先级：`节点 model` > `engines[别名].model` > CLI 默认。别名在 config 中缺失时启动即报错。同一 `type`+`model`+读写模式的节点共享引擎会话，因此 `coder` 与 `fixer` 配同一模型时仍能延续上下文。
 
 ## 3. 人工介入机制
 

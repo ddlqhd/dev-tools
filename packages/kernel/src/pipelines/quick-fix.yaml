@@ -4,16 +4,16 @@ pipeline: quick-fix
 nodes:
   code:
     type: agent
-    engine: default
+    engine: coder
     promptTemplate: code
   codeReview:
     type: review
-    engine: reviewer
+    engine: codeReviewer
     severityGate: major
     outputs: [reviewComments]
   fixReview:
     type: agent
-    engine: default
+    engine: fixer
     inputs: [reviewComments]
     promptTemplate: fix
   verify:

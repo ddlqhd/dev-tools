@@ -5,13 +5,13 @@ pipeline: plan-only
 nodes:
   plan:
     type: agent
-    engine: default
+    engine: planner
     readonly: true
     promptTemplate: plan
     outputs: [planDoc]
   planReview:
     type: review
-    engine: reviewer
+    engine: planReviewer
     inputs: [planDoc]
     outputs: [planComments]
     severityGate: major

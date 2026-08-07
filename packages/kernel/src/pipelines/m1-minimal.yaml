@@ -5,13 +5,13 @@ pipeline: m1-minimal
 nodes:
   plan:
     type: agent
-    engine: default
+    engine: planner
     readonly: true
     promptTemplate: plan
     outputs: [planDoc]
   code:
     type: agent
-    engine: default
+    engine: coder
     inputs: [planDoc]
     promptTemplate: code
   commit:

@@ -3,6 +3,8 @@ import { z } from "zod";
 export const NodeSpecSchema = z.object({
   type: z.enum(["agent", "review", "gate", "command", "commit"]),
   engine: z.string().optional(),
+  /** Per-node model override; wins over engines[alias].model when set. */
+  model: z.string().optional(),
   readonly: z.boolean().optional(),
   promptTemplate: z.string().optional(),
   inputs: z.array(z.string()).optional(),

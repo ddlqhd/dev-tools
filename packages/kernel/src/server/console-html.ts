@@ -156,7 +156,10 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
         case "task.suspended": return "suspended: " + (p.reason || "");
         case "task.resumed": return "resumed @ " + p.nodeId;
         case "task.aborted": return "aborted";
-        case "node.started": return "▶ " + p.nodeId + " (" + p.primitive + ")";
+        case "node.started": {
+          var meta = [p.engine, p.model].filter(Boolean).join("/");
+          return "▶ " + p.nodeId + " (" + p.primitive + (meta ? ", " + meta : "") + ")";
+        }
         case "node.completed": return "✓ " + p.nodeId;
         case "loop.iteration": return "loop " + p.loopId + " " + p.iteration + "/" + p.maxIterations;
         case "engine.chunk": {

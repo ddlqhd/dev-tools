@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
+import type { NodeSpec } from "@devtools/shared";
 
 export const CodeloopConfigSchema = z.object({
   version: z.literal(1),
@@ -15,8 +16,11 @@ export const CodeloopConfigSchema = z.object({
       }),
     )
     .default({
-      default: { type: "cursor" },
-      reviewer: { type: "cursor" },
+      planner: { type: "cursor" },
+      planReviewer: { type: "cursor" },
+      coder: { type: "cursor" },
+      codeReviewer: { type: "cursor" },
+      fixer: { type: "cursor" },
     }),
   budget: z
     .object({
@@ -36,12 +40,36 @@ export const CodeloopConfigSchema = z.object({
 
 export type CodeloopConfig = z.infer<typeof CodeloopConfigSchema>;
 
+export function getMissingEngineConfigs(
+  nodes: Record<string, NodeSpec>,
+  engines: CodeloopConfig["engines"],
+): string[] {
+  const required = new Set<string>();
+  for (const node of Object.values(nodes)) {
+    if (node.type === "agent" || node.type === "review") {
+      required.add(node.engine ?? "coder");
+    }
+  }
+  return [...required].filter((engine) => !engines[engine]);
+}
+
 export const DEFAULT_CONFIG_YAML = `version: 1
 pipeline: default-codeloop
+# Stage engines: assign different models for cross-review.
+# List available model ids with: agent --list-models
 engines:
-  default:
+  planner:
     type: cursor
-  reviewer:
+    # model: <strong reasoning model>
+  planReviewer:
+    type: cursor
+    # model: <different from planner>
+  coder:
+    type: cursor
+  codeReviewer:
+    type: cursor
+    # model: <different from coder>
+  fixer:
     type: cursor
 budget:
   maxEngineCalls: 60

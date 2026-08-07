@@ -325,9 +325,17 @@ export class PipelineInterpreter {
     this.throwIfAborted();
 
     this.opts.store.updateTask(this.opts.taskId, { current_node: nodeId });
+    const engineKey =
+      spec.type === "command" || spec.type === "commit" || spec.type === "gate"
+        ? undefined
+        : (spec.engine ?? "coder");
+    const engineConf = engineKey ? this.opts.config.engines[engineKey] : undefined;
+    const resolvedModel = engineKey ? (spec.model ?? engineConf?.model) : undefined;
     await this.opts.events.emit("node.started", {
       nodeId,
       primitive: spec.type,
+      engine: engineKey,
+      model: resolvedModel,
       loopStack: [...this.loopStack],
     });
 
@@ -460,11 +468,18 @@ export class PipelineInterpreter {
     if (spec.type === "command" || spec.type === "commit" || spec.type === "gate") {
       return undefined;
     }
-    const engineKey = spec.engine ?? "default";
-    const engineConf = this.opts.config.engines[engineKey] ?? this.opts.config.engines.default;
-    if (!engineConf) throw new Error(`No engine config for: ${engineKey}`);
+    const engineKey = spec.engine ?? "coder";
+    const engineConf = this.opts.config.engines[engineKey];
+    if (!engineConf) {
+      const known = Object.keys(this.opts.config.engines).join(", ") || "(none)";
+      throw new Error(
+        `No engine config for "${engineKey}". Known engines: ${known}. ` +
+          `Add it under engines in .codeloop/config.yaml.`,
+      );
+    }
 
     const type = resolveEngineType(engineConf.type);
+    const model = spec.model ?? engineConf.model;
     const artifactWriteOnly =
       spec.type === "review" ||
       (spec.type === "agent" &&
@@ -472,14 +487,15 @@ export class PipelineInterpreter {
     const readonly = artifactWriteOnly
       ? true
       : (spec.readonly ?? spec.type === "review");
-    const cacheKey = `${engineKey}:${type}:${artifactWriteOnly ? "artifact" : readonly ? "ro" : "rw"}`;
+    const mode = artifactWriteOnly ? "artifact" : readonly ? "ro" : "rw";
+    const cacheKey = `${type}:${model ?? "-"}:${mode}`;
     const existing = this.sessions.get(cacheKey);
     if (existing) return existing;
 
     const adapter: EngineAdapter = getEngineAdapter(type);
     const session = await adapter.createSession({
       cwd: this.opts.worktree.worktreePath,
-      model: engineConf.model,
+      model,
       readonly,
       artifactWriteOnly,
       nodeTimeoutMs: this.opts.config.budget.nodeTimeoutMinutes * 60_000,
