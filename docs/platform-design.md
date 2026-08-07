@@ -62,7 +62,7 @@ stateDiagram-v2
     Cancelled --> [*]
 ```
 
-L2 状态由内核事件驱动推导（如收到 `intervention.required` 进 WaitingHuman），不重复维护内核内部的 Stage 细节，只做粗粒度镜像；Stage 级进度直接透传给前端展示。
+L2 状态由内核事件驱动推导（如收到 `intervention.required` 进 WaitingHuman），不重复维护内核内部的 pipeline 节点细节，只做粗粒度镜像；节点级进度（含任务的 pipeline 快照）直接透传给前端展示。
 
 ### 2.2 调度器
 
@@ -133,7 +133,7 @@ flowchart LR
     Derive --> Reporter[平台回写器 → Adapter]
 ```
 
-- **摄取**：每实例一条 WebSocket 订阅（`verbose=false`，Stage 级事件；控制台打开任务详情时才由 API 直连该实例拉 verbose 流，细粒度 `engine.chunk` 不进中心 DB）。
+- **摄取**：每实例一条 WebSocket 订阅（`verbose=false`，节点级事件；控制台打开任务详情时才由 API 直连该实例拉 verbose 流，细粒度 `engine.chunk` 不进中心 DB）。
 - **幂等**：`task_events` 以 `(kernel_task_id, seq)` 唯一，断线重连用最后 seq 补拉。
 - **回写节流**：平台评论更新合并节流（同任务 ≥ 30s 一次），`intervention.required` 例外立即回写并 @ 人。
 
@@ -176,8 +176,9 @@ CREATE TABLE tasks (
   kernel_task_id  TEXT,                     -- 内核侧 taskId
   branch          TEXT,
   pr_number       INTEGER,
-  current_stage   TEXT,                     -- 透传的内核 Stage(展示用)
-  iteration       INTEGER,
+  current_node    TEXT,                     -- 透传的内核当前节点(展示用)
+  loop_state      TEXT,                     -- JSON: 各层 loop 计数(如 {"reviewLoop": 2})
+  pipeline_name   TEXT,                     -- 任务使用的 pipeline 模板名 + hash
   error           TEXT,
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
@@ -196,7 +197,7 @@ CREATE TABLE instances (
   last_seen_at TEXT NOT NULL                -- 心跳
 );
 
--- 聚合的内核事件(Stage 级)
+-- 聚合的内核事件(节点级)
 CREATE TABLE task_events (
   task_id     TEXT NOT NULL REFERENCES tasks(id),
   seq         INTEGER NOT NULL,             -- 内核事件 seq
@@ -262,10 +263,10 @@ POST   /webhooks/github
 
 React + Vite，页面结构：
 
-- **任务看板**（首页）：按状态分列（排队/运行中/等人/已完成/失败），卡片显示仓库、issue 链接、当前 Stage 进度条、轮次；`waiting_human` 列置顶高亮 + 浏览器通知。
+- **任务看板**（首页）：按状态分列（排队/运行中/等人/已完成/失败），卡片显示仓库、issue 链接、当前节点进度条（按任务的 pipeline 快照渲染）、循环轮次；`waiting_human` 列置顶高亮 + 浏览器通知。
 - **任务详情**：
   - 头部：L2 状态、分支、issue/PR 链接、用量与预算条、pause/resume/abort 操作；
-  - Stage 时间线：每个 Stage 的起止、轮次、产物入口；
+  - 节点时间线：按 pipeline 快照渲染，每个节点的起止、循环轮次、产物入口；
   - 实时活动流：verbose 事件渲染（引擎正在做什么、改了哪些文件）；
   - 产物查看：计划文档（markdown 渲染）、评审意见列表（按 severity 分组、逐条状态）、diff 查看器；
   - 介入面板：审批门出现时就地 approve/reject（带意见输入）/edit 确认，任意时刻可注入指令。

@@ -37,22 +37,22 @@
 
 1. 工具调用、文件编辑、上下文管理、沙箱等 Agent 基础能力由成熟产品提供，内核专注于**流程编排**这一差异化价值；
 2. 各家 CLI 都提供了 headless / 非交互模式和结构化流式输出，适合被子进程封装；
-3. 引擎可插拔，不同 Stage 甚至可以用不同引擎（如编码用 A、评审用 B，避免"自己审自己"的偏差）。
+3. 引擎可插拔，不同节点甚至可以用不同引擎（如编码用 A、评审用 B，避免"自己审自己"的偏差）。
 
 Engine Adapter 的统一接口、子进程管理与流式输出解析见 [kernel-design.md 第 4 节](./kernel-design.md#4-engine-adapter)。
 
-### 2.3 流程模型：显式状态机而非自由 Agent
+### 2.3 流程模型：显式编排的 pipeline 而非自由 Agent
 
-codeloop 不是"给 Agent 一个大 prompt 让它自己跑完所有环节"，而是一个**显式状态机**，每个环节（Stage）是一次独立的、目标明确的引擎调用。这样：
+codeloop 不是"给 Agent 一个大 prompt 让它自己跑完所有环节"，而是一个**显式编排的 pipeline**：流程由少数节点原语（agent / review / gate / command / commit）按结构化块（顺序、循环、分支）组合而成，默认 codeloop 只是内置的一个模板，可按仓库/任务替换为自定义编排。这样：
 
-- 每个 Stage 边界天然成为**检查点**：可暂停、可审批、可重试、可人工接管；
-- 进度对人可见、可解释（当前在哪个 Stage、第几轮迭代、产出了什么）；
-- 评审环节可以独立配置为 AI 评审、人工评审或"AI 先审 + 人终审"。
+- 每个节点边界天然成为**检查点**：可暂停、可审批、可重试、可人工接管；
+- 进度对人可见、可解释（当前在哪个节点、第几轮迭代、产出了什么）；循环块必须声明上限与退出条件，终止性由构造保证；
+- 评审环节可以独立配置为 AI 评审、人工评审或"AI 先审 + 人终审"（review 节点后接 gate 节点）。
 
 ### 2.4 工作区与产出物：一切基于 git
 
 - 每个任务在独立的 git worktree + 分支上运行，互不干扰，天然支持多实例并发跑同一个仓库；
-- 每个 Stage 的代码产出以 commit 固化，人工介入时看到的永远是干净的 git 状态；
+- 每个节点的代码产出以 commit 固化，人工介入时看到的永远是干净的 git 状态；
 - 最终产出是分支上的一串 commit，由内核（或上层管理系统）推送并创建 PR。
 
 ## 3. 总体架构
@@ -76,7 +76,7 @@ flowchart TB
     end
 
     subgraph l1 [L1 开发内核实例 xN]
-        Kernel[codeloop 运行时<br/>状态机 + 检查点]
+        Kernel[codeloop 运行时<br/>pipeline 解释器 + 检查点]
         Engine[Engine Adapter]
         Store[(本地 SQLite + JSONL 事件流)]
         WT[git worktree]
@@ -96,7 +96,7 @@ flowchart TB
 | 关注点 | 内核（L1） | 管理系统（L2） |
 |---|---|---|
 | 需求输入 | 一段文本需求（来自人或上层） | 从平台 issue 转换为需求文本 |
-| 流程 | 单任务 codeloop 状态机 | 多任务排队、并发控制、失败重试 |
+| 流程 | 单任务 codeloop pipeline（可编排） | 多任务排队、并发控制、失败重试 |
 | git | worktree/分支内的 commit | clone 仓库、推送分支、创建 PR |
 | 人工介入 | 检查点暂停、审批门、指令注入 | 把介入入口透出到 Web 控制台，转发给对应实例 |
 | 状态存储 | 本地 SQLite + JSONL（单任务） | 中心 DB（全局任务/实例/事件聚合） |
@@ -107,8 +107,8 @@ flowchart TB
 内核以守护模式（`codeloop serve`）运行时暴露：
 
 1. **控制 API（HTTP）**：创建/启动/暂停/恢复/中止任务，提交审批决定，注入人工指令；
-2. **事件流（WebSocket / SSE）**：Stage 转换、引擎输出、diff 产生、审批请求等结构化事件，支持断线后按序号重放；
-3. **状态查询（HTTP）**：任务快照（当前 Stage、迭代轮次、产物列表、git 状态）。
+2. **事件流（WebSocket / SSE）**：节点转换、循环轮次、引擎输出、diff 产生、审批请求等结构化事件，支持断线后按序号重放；
+3. **状态查询（HTTP）**：任务快照（pipeline 定义、当前节点、循环轮次、产物列表、git 状态）。
 
 协议的具体定义（事件类型、payload 结构）见 [kernel-design.md 第 6 节](./kernel-design.md#6-事件协议)。管理系统只依赖这三个接口，不触碰内核的本地存储和 worktree。
 
@@ -127,19 +127,19 @@ sequenceDiagram
     Dev->>CLI: codeloop run "实现 xxx 功能"
     CLI->>K: 创建任务(需求文本, 仓库路径)
     K->>K: 创建 worktree + 分支
-    K->>E: Plan Stage(需求)
+    K->>E: plan 节点(需求)
     E->>A: 子进程调用(计划 prompt)
     A-->>E: stream-json 输出
     E-->>K: 计划文档
     K-->>CLI: 事件: 计划完成, 等待评审
     Dev->>CLI: 查看计划, approve / 修改意见
-    K->>E: Code Stage(按计划编码)
+    K->>E: code 节点(按计划编码)
     E-->>K: 代码变更(commit)
-    K->>E: CodeReview Stage(diff 评审)
+    K->>E: codeReview 节点(diff 评审)
     E-->>K: 评审意见列表
-    K->>E: FixReview Stage(逐条修正)
+    K->>E: fixReview 节点(逐条修正)
     Note over K: 评审-修正回环直至通过或达上限
-    K->>K: Commit Stage(整理提交)
+    K->>K: commit 节点(整理提交)
     K-->>CLI: 任务完成, 分支就绪
 ```
 
@@ -158,7 +158,7 @@ sequenceDiagram
     PA->>S: 入队任务(issue → 需求文本)
     S->>S: 检查并发额度
     S->>K: 拉起实例(codeloop serve) + 创建任务
-    K-->>Sync: 事件流(Stage 进度 / 审批请求)
+    K-->>Sync: 事件流(节点进度 / 审批请求)
     Sync->>UI: WebSocket 推送
     Sync->>PA: 关键节点回写 issue 评论
     UI->>K: 人工介入(审批 / 注入指令), 经管理 API 转发
@@ -175,7 +175,7 @@ dev-tools/
 ├── packages/
 │   ├── kernel/                    # @devtools/kernel  内核库
 │   │   └── src/
-│   │       ├── loop/              # 状态机、Stage 实现
+│   │       ├── loop/              # pipeline 解释器、节点原语(NodeRunner)实现
 │   │       ├── engines/           # Engine Adapter 及各 CLI 实现
 │   │       ├── store/             # SQLite + JSONL 持久化
 │   │       ├── server/            # codeloop serve: 控制 API + 事件流
@@ -199,17 +199,17 @@ dev-tools/
 
 ## 7. 安全与资源边界
 
-- **Agent 执行边界**：Agent CLI 一律以受限模式运行（如 Claude Code 的权限模式、Codex 的 sandbox），写权限限定在任务 worktree 内；由 Engine Adapter 统一注入这些安全参数，Stage 实现无需关心。
+- **Agent 执行边界**：Agent CLI 一律以受限模式运行（如 Claude Code 的权限模式、Codex 的 sandbox），写权限限定在任务 worktree 内；由 Engine Adapter 统一注入这些安全参数，节点实现无需关心。
 - **凭证管理**：平台 token（GitHub PAT / App 凭证）只存在于 L2；内核实例通过一次性注入的、按仓库限权的凭证做 git 推送（或由 L2 代为推送，内核完全不接触凭证——第一版采用后者，更简单安全）。
-- **资源控制**：每实例的引擎调用次数、token 预算、最大迭代轮次、单 Stage 超时都在 codeloop 配置中声明，超限即挂起并请求人工介入，防止失控循环烧钱。
+- **资源控制**：每实例的引擎调用次数、token 预算、循环轮次上限、单节点超时都在 codeloop 配置与 pipeline 定义中声明，超限即挂起并请求人工介入，防止失控循环烧钱。
 - **审计**：JSONL 事件流是 append-only 的完整审计日志，包含每次引擎调用的 prompt 摘要、产出 diff、审批人与决定。
 
 ## 8. 演进路线
 
 | 阶段 | 范围 | 里程碑 |
 |---|---|---|
-| M1 | 内核最小闭环 | `codeloop run` 跑通 Plan → Code → Commit（评审先用 AI 单轮），单引擎（先接一个 CLI） |
-| M2 | 完整 codeloop + 人工介入 | 计划/代码评审回环、审批门、pause/resume、`codeloop serve` 事件流 |
+| M1 | 内核最小闭环 | `codeloop run` 跑通 plan → code → commit（评审先用 AI 单轮）；内部已按节点原语实现，但只跑内置流程；单引擎（先接一个 CLI） |
+| M2 | 完整 codeloop + 编排 + 人工介入 | 计划/代码评审回环、审批门、pause/resume、`codeloop serve` 事件流；开放 pipeline DSL 与预置模板（quick-fix / plan-only 等） |
 | M3 | 管理系统最小版 | 调度器 + GitHub Adapter（拉 issue、开 PR、评论进度）+ 控制台任务列表/详情 |
 | M4 | 强化 | 多引擎、失败恢复、容器化 Launcher、GitLab/Gitee Adapter |
 

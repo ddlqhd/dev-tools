@@ -1,7 +1,7 @@
 # 开发内核（codeloop）详细设计
 
 > 上层文档：[architecture.md](./architecture.md)
-> 内核是一个可独立使用的单任务自动化开发引擎：输入需求，自动完成 计划 → 计划评审 → 编码 → 代码检视 → 意见修正 → 提交 的闭环，人可随时观察与介入。
+> 内核是一个可独立使用的单任务自动化开发引擎：输入需求，按可编排的 pipeline 自动完成 计划 → 计划评审 → 编码 → 代码检视 → 意见修正 → 提交 的闭环，人可随时观察与介入。
 
 ## 1. 运行模型
 
@@ -9,117 +9,185 @@
 
 | 概念 | 说明 |
 |---|---|
-| Task | 一次完整的开发任务：一段需求文本 + 一个仓库 + 一个 codeloop 配置。任务在独立 worktree/分支上运行 |
-| Stage | 状态机的一个环节（Plan、Code、CodeReview…），一次目标明确的引擎调用或人工动作 |
-| Iteration | 评审回环的轮次计数（计划回环和代码回环分别计数） |
-| Checkpoint | Stage 边界的持久化快照，暂停/恢复/崩溃恢复的锚点 |
-| Gate | 审批门：配置在某 Stage 之后，要求人（或 AI）给出 approve / reject 决定后才能继续 |
-| Artifact | Stage 产物：计划文档、评审意见列表、diff、commit 等，全部落盘可追溯 |
+| Task | 一次完整的开发任务：一段需求文本 + 一个仓库 + 一个 pipeline 定义。任务在独立 worktree/分支上运行 |
+| Pipeline | 可编排的流程定义：由节点按结构化块（顺序 / 循环 / 分支）组合而成；默认 codeloop 只是内置的一个 pipeline 模板 |
+| Node | 流程中的一个环节，由少数几种**节点原语**之一实例化（如 `plan` 是一个 `agent` 原语节点） |
+| Loop 块 | 结构化循环：声明 body 节点序列、`until` 退出条件与 `maxIterations`；计划回环、评审回环都由它表达 |
+| Checkpoint | 节点边界的持久化快照，暂停/恢复/崩溃恢复的锚点 |
+| Gate | 审批门节点：要求人给出 approve / reject / edit 决定后流程才能继续 |
+| Artifact | 节点产物：计划文档、评审意见列表、diff、commit 等，以命名产物（artifact key）在节点间传递，全部落盘可追溯 |
 
-### 1.2 codeloop 状态机
+### 1.2 编排模型：结构化 pipeline，而非自由 DAG
+
+codeloop 的流程是**可编排**的，但刻意不开放"任意节点连边"的自由图，只提供三种结构化块：
+
+- **sequence**：顺序执行；
+- **loop**：循环块，必须声明 `maxIterations` 与 `until` 退出条件；
+- **branch**：条件分支（`when` 表达式选择子流程）。
+
+选择结构化而非自由 DAG 的理由：
+
+1. **终止性由构造保证**：每个循环必须有上限，写不出无限回环；超限统一挂起等人处置；
+2. **进度可解释**：UI 能按块渲染出确定的进度条和"当前位置"，检查点语义简单（节点 id + 各层 loop 计数器）；
+3. **配置可读**：顺序 + 循环的 YAML 一眼能看懂；自由边列表 + guard 表达式在流程稍复杂时不可维护。
+
+条件表达式（`until` / `when`）使用小型安全求值器（JSONata 或 CEL 风格），只能读取节点结果（`outcome`）与产物字段，**不执行任意代码**。
+
+### 1.3 节点原语
+
+所有环节由 5 种原语实例化，编排层只组合原语：
+
+| 原语 | 说明 | 默认 pipeline 中的节点 |
+|---|---|---|
+| `agent` | 一次引擎调用：可配只读/可写、prompt 模板、输入产物 | plan、code、fixReview |
+| `review` | 引擎调用 + 强制结构化意见输出（ReviewComment[]），产出 `passed` 判定 | planReview、codeReview |
+| `gate` | 人工审批门（approve / reject / edit），可配超时 | planGate |
+| `command` | 运行 shell 命令，退出码决定结果 | verify（lint/test） |
+| `commit` | 内核内置的 git 整理提交（message 由引擎生成、人可改），非引擎调用 | commit |
+
+节点间通过**命名产物**传递数据（黑板模式）：节点声明 `inputs` / `outputs` 引用 artifact key，不依赖隐式顺序。"AI 先审 + 人终审"不需要特殊实现，就是 `review` 节点后面接一个 `gate` 节点。
+
+### 1.4 默认 pipeline（default-codeloop）
+
+内置模板等价于以下流程，即"计划回环 + 代码评审回环"的经典 codeloop：
 
 ```mermaid
 stateDiagram-v2
     [*] --> Init: 创建 worktree/分支
-    Init --> Plan
-    Plan --> PlanReview
-    PlanReview --> Plan: reject(带意见, 轮次+1)
-    PlanReview --> Code: approve
-    Code --> CodeReview
-    CodeReview --> FixReview: 有意见(轮次+1)
-    FixReview --> CodeReview: 修正后复审
-    CodeReview --> Commit: 通过
+    state planLoop {
+        Plan --> PlanReview
+        PlanReview --> Plan: 不通过(意见回灌, 轮次+1)
+    }
+    Init --> planLoop
+    planLoop --> PlanGate: passed
+    PlanGate --> Code: approve
+    state reviewLoop {
+        CodeReview --> FixReview: 有未解决意见(轮次+1)
+        FixReview --> CodeReview
+    }
+    Code --> reviewLoop
+    reviewLoop --> Verify: passed
+    Verify --> reviewLoop: 失败(转为 blocker 意见)
+    Verify --> Commit: 通过
     Commit --> Done
     Done --> [*]
-
-    Plan --> Suspended: 暂停/超限/引擎故障
-    Code --> Suspended
-    CodeReview --> Suspended
-    Suspended --> Plan: 恢复(回到检查点)
-    Suspended --> Aborted: 人工中止
-    Aborted --> [*]
 ```
 
-要点：
+运行时要点（与 pipeline 形状无关，由内核运行时统一保证）：
 
-- **两个回环**：计划回环（PlanReview → Plan）与代码回环（CodeReview → FixReview → CodeReview），分别有独立的 `maxIterations`（默认计划 3 轮、代码 5 轮）；达到上限自动进入 `Suspended` 并发出 `intervention.required` 事件，等人处置，绝不无限循环。
-- **Suspended 是一等状态**：暂停、预算超限、引擎崩溃、审批超时都收敛到这个状态，统一从最近 Checkpoint 恢复。
-- 任何 Stage 失败先按策略自动重试（默认 1 次），仍失败才挂起。
+- **Suspended 是一等状态**：暂停、循环超限、预算超限、引擎崩溃、审批超时都收敛到 Suspended，统一从最近 Checkpoint 恢复；人工中止则进入 Aborted；
+- 任何节点失败先按策略自动重试（默认 1 次），仍失败才挂起；
+- loop 达到 `maxIterations` 时发出 `intervention.required` 事件并挂起，绝不无限循环。
 
-### 1.3 各 Stage 职责与产物
+## 2. Pipeline 定义与节点接口
 
-| Stage | 执行者 | 输入 | 产物（Artifact） |
-|---|---|---|---|
-| Plan | 引擎（只读模式，禁写文件） | 需求文本 + 仓库上下文 | `plan.md`：目标、改动文件清单、步骤、验证方式 |
-| PlanReview | AI 引擎 / 人 / 两者（按 Gate 配置） | plan.md | 评审结论 + 意见列表；reject 时意见回灌 Plan |
-| Code | 引擎（可写 worktree） | plan.md（+ 历史评审意见） | 代码变更，按步骤形成 WIP commit |
-| CodeReview | AI 引擎（建议与 Code 用不同引擎/模型）/ 人 | 分支 diff + plan.md | `review-N.json`：结构化意见列表（文件、行、severity、建议） |
-| FixReview | 引擎（可写） | 未解决的意见列表 | 修正 commit + 逐条意见的处理标记（fixed / rejected+理由） |
-| Commit | 内核自身（非引擎） | 全部 WIP commit | squash/整理为规范 commit（message 由引擎生成、人可改），跑配置的验证命令（lint/test） |
+### 2.1 Pipeline DSL（`.codeloop/pipelines/*.yaml`）
 
-Commit Stage 中运行验证命令失败时，视为一条 blocker 级评审意见回到代码回环。
+默认模板 `default-codeloop` 的完整定义：
 
-## 2. Stage 接口与可插拔性
+```yaml
+version: 1
+pipeline: default-codeloop
+
+nodes:
+  plan:       { type: agent,  engine: default,  readonly: true, promptTemplate: plan, outputs: [planDoc] }
+  planReview: { type: review, engine: reviewer, inputs: [planDoc], outputs: [planComments] }
+  planGate:   { type: gate,   timeout: 24h }
+  code:       { type: agent,  engine: default,  inputs: [planDoc], promptTemplate: code }
+  codeReview: { type: review, engine: reviewer, severityGate: major, outputs: [reviewComments] }
+  fixReview:  { type: agent,  engine: default,  inputs: [reviewComments], promptTemplate: fix }
+  verify:     { type: command, run: ["pnpm lint", "pnpm test"] }
+  commit:     { type: commit, messageStyle: conventional }
+
+flow:
+  - loop:
+      id: planLoop
+      maxIterations: 3
+      body: [plan, planReview]
+      until: planReview.passed
+  - planGate
+  - code
+  - loop:
+      id: reviewLoop
+      maxIterations: 5
+      body: [codeReview, fixReview]
+      until: codeReview.passed
+  - verify:
+      onFail: { goto: reviewLoop, asComment: blocker }   # 唯一受控回跳:验证失败转为 blocker 意见回评审环
+  - commit
+```
+
+官方预置模板（可直接引用或复制修改）：
+
+| 模板 | 流程 | 场景 |
+|---|---|---|
+| `default-codeloop` | 上述完整闭环 | 常规需求开发 |
+| `quick-fix` | code → reviewLoop → verify → commit（跳过计划环） | 小改动 / 明确的 bugfix |
+| `plan-only` | planLoop → planGate（产出方案供人评审，不编码） | 方案先行 |
+| `review-only` | codeReview（对现有分支做一轮 AI 评审） | 存量代码检视 |
+
+### 2.2 加载期静态校验
+
+任务创建时校验 pipeline 定义，不合法直接拒绝创建（而非跑到一半失败）：
+
+- 单入口、必达终点（`commit` 或显式 end）；
+- 每个 loop 块有 `maxIterations` 与 `until`；`goto` 只允许跳向 flow 中已声明的 loop 块；
+- 产物依赖闭合：每个 `inputs` 的 key 都有上游节点 `outputs` 或任务初始输入提供；
+- 节点引用的 engine / promptTemplate 存在。
+
+### 2.3 版本固化
+
+任务创建时把 pipeline 定义内容与 hash 快照进任务记录：运行中修改模板不影响已运行的任务；审计与事件重放时可还原当时的流程形状；控制台 / CLI 按该快照渲染进度。
+
+### 2.4 节点接口（内核内部）
 
 ```ts
-// packages/kernel/src/loop/stage.ts
-export interface StageContext {
-  task: TaskSnapshot;                    // 任务快照(需求、配置、轮次)
+// packages/kernel/src/loop/node.ts
+export interface NodeContext {
+  task: TaskSnapshot;                    // 任务快照(需求、pipeline 快照、loop 计数器栈)
   worktree: GitWorktree;                 // 当前工作区句柄
-  artifacts: ArtifactStore;              // 读写产物
-  engine: EngineSession;                 // 本 Stage 绑定的引擎会话
-  emit(event: KernelEvent): void;        // 发事件
+  artifacts: ArtifactStore;              // 按 key 读写命名产物
+  engine?: EngineSession;                // 节点绑定的引擎会话(command/commit 原语无)
+  instructions: string[];                // 本节点待消费的人工注入指令
+  emit(event: KernelEvent): void;
   requestIntervention(req: InterventionRequest): Promise<InterventionDecision>;
   signal: AbortSignal;                   // 暂停/中止信号
 }
 
-export interface Stage {
-  readonly name: StageName;
-  run(ctx: StageContext): Promise<StageResult>;
+export interface NodeRunner {
+  readonly type: NodePrimitive;          // "agent" | "review" | "gate" | "command" | "commit"
+  run(spec: NodeSpec, ctx: NodeContext): Promise<NodeResult>;
 }
 
-export type StageResult =
-  | { kind: "next" }                                   // 进入默认下一环节
-  | { kind: "loop"; reason: string; payload?: unknown } // 回环(评审不通过)
-  | { kind: "suspend"; reason: SuspendReason };
-
-export type StageName =
-  | "init" | "plan" | "planReview" | "code"
-  | "codeReview" | "fixReview" | "commit";
+export interface NodeResult {
+  outputs: Record<string, ArtifactRef>;  // 写入黑板的命名产物
+  outcome: Record<string, unknown>;      // 供 until/when 表达式取值(如 { passed: true })
+}
 ```
 
-- 状态机引擎只认识 `Stage` 接口和 `StageResult`，Stage 的内部实现（调引擎、调人、跑命令）完全自由，因此评审环节换成"AI + 人双审"只是换一个 Stage 实现。
-- 转移表由 codeloop 配置声明（见 2.1），第一版内置默认流程，不开放自定义 DAG（避免过度设计），但 Stage 实现可注册替换。
+- 流程解释器只认识结构化块与 `NodeRunner`：按 flow 顺序执行，loop 块维护计数器栈，`until` / `when` 表达式在 `outcome` 上求值；
+- 5 种原语各对应一个 `NodeRunner` 实现，扩展新原语 = 注册新 runner（如后续增加 `subpipeline` 原语复用流程片段）；
+- 运行时是一个百余行的结构化解释器，不引入通用 FSM 库——结构化块的执行语义足够简单，用 XState 反而要把块结构降解成扁平状态图，得不偿失。
 
-### 2.1 codeloop 配置（`.codeloop/config.yaml`）
+### 2.5 codeloop 配置（`.codeloop/config.yaml`）
+
+配置负责选择 pipeline 并提供运行环境（引擎、预算、git），流程形状全部在 pipeline 定义中：
 
 ```yaml
 version: 1
+pipeline: default-codeloop       # 引用内置模板或 .codeloop/pipelines/ 下的自定义模板
+pipelineOverrides:               # 不改模板的轻量覆盖(仅允许节点参数, 不允许改 flow)
+  planGate: { timeout: 4h }
+  verify:   { run: ["pnpm lint", "pnpm test -- --changed"] }
 engines:
   default:
     type: claude-code            # claude-code | cursor-cli | codex
     model: sonnet
   reviewer:
     type: codex                  # 评审用不同引擎, 避免自审偏差
-loop:
-  plan:
-    engine: default
-    maxIterations: 3
-  planReview:
-    mode: ai-then-human          # ai | human | ai-then-human
-    gate: required               # required | auto(AI 通过即放行)
-  code:
-    engine: default
-  codeReview:
-    engine: reviewer
-    maxIterations: 5
-    severityGate: major          # 达到该级别的意见必须修复
-  commit:
-    verify: ["pnpm lint", "pnpm test"]
-    messageStyle: conventional
 budget:
   maxEngineCalls: 60
-  stageTimeoutMinutes: 30
+  nodeTimeoutMinutes: 30
 git:
   branchPrefix: codeloop/
   worktreeRoot: .codeloop/worktrees
@@ -131,12 +199,12 @@ git:
 
 ### 3.1 审批门（Gate）
 
-配置了 `gate: required` 的 Stage 结束后，内核发出 `intervention.required` 事件并阻塞（带可配超时，超时进 Suspended）。决定的结构：
+流程执行到 `gate` 节点时，内核发出 `intervention.required` 事件并阻塞（带可配超时，超时进 Suspended）。决定的结构：
 
 ```ts
 export type InterventionDecision =
   | { action: "approve" }
-  | { action: "reject"; comments: ReviewComment[] }   // 意见回灌上一 Stage
+  | { action: "reject"; comments: ReviewComment[] }   // 意见回灌: 重入所在(或前置)loop 块, 意见作为输入
   | { action: "edit"; note: string };                 // 人已直接改了产物(计划文档/代码), 内核重新读取后继续
 ```
 
@@ -144,17 +212,17 @@ export type InterventionDecision =
 
 ### 3.2 暂停 / 恢复 / 中止
 
-- `pause`：向当前 Stage 的 `AbortSignal` 发信号。引擎子进程被终止，Stage 回滚到本 Stage 开始时的 Checkpoint（worktree 用 git 清理到检查点 commit），状态置 Suspended。
-- `resume`：从 Checkpoint 重建 StageContext 重跑当前 Stage，可附带一段人工指令（见 3.3）。
+- `pause`：向当前节点的 `AbortSignal` 发信号。引擎子进程被终止，回滚到本节点开始时的 Checkpoint（worktree 用 git 清理到检查点 commit），状态置 Suspended。
+- `resume`：从 Checkpoint 重建 NodeContext 重跑当前节点，可附带一段人工指令（见 3.3）。
 - `abort`：终止任务，worktree 保留（人可能要捡走部分成果），分支不删除。
 
 ### 3.3 指令注入
 
-任意时刻可以给任务追加一条人工指令（如"计划里第 3 步改用方案 B"、"不要动 legacy/ 目录"）。指令进入任务的 **指令队列**，在下一个 Stage 开始时拼进该 Stage 的 prompt，并作为事件记录在案。运行中的 Stage 不被打断（要立即生效就先 pause）。
+任意时刻可以给任务追加一条人工指令（如"计划里第 3 步改用方案 B"、"不要动 legacy/ 目录"）。指令进入任务的 **指令队列**，在下一个节点开始时拼进该节点的 prompt，并作为事件记录在案。运行中的节点不被打断（要立即生效就先 pause）。
 
 ### 3.4 崩溃恢复
 
-Checkpoint 内容 = 状态机位置 + 轮次计数 + worktree 的 HEAD commit + 引擎会话 id + 未消费的指令队列，写入本地 SQLite。进程崩溃后 `codeloop resume <taskId>` 可从最近 Checkpoint 继续；引擎会话若可续接（各 CLI 均支持 resume/session id）则续接，否则以 Checkpoint 的产物冷启动该 Stage。
+Checkpoint 内容 = 当前节点 id + 各层 loop 计数器栈 + worktree 的 HEAD commit + 引擎会话 id + 未消费的指令队列，写入本地 SQLite。进程崩溃后 `codeloop resume <taskId>` 可从最近 Checkpoint 继续；引擎会话若可续接（各 CLI 均支持 resume/session id）则续接，否则以 Checkpoint 的产物冷启动该节点。
 
 ## 4. Engine Adapter
 
@@ -172,7 +240,7 @@ export interface EngineAdapter {
 export interface SessionOptions {
   cwd: string;                 // 任务 worktree
   model?: string;
-  readonly?: boolean;          // Plan/Review 等只读 Stage 禁写
+  readonly?: boolean;          // plan/review 等只读节点禁写
   allowedTools?: string[];     // 映射到各 CLI 的权限参数
   env?: Record<string, string>;
 }
@@ -212,13 +280,13 @@ export interface EngineTurnResult {
 统一的子进程封装负责：
 
 - 按行解析 stream-json，映射为 `EngineChunk`（不认识的事件类型透传为原始日志，不报错）；
-- 空闲超时（可配，默认 5 分钟无输出）与 Stage 总超时，超时先发 SIGINT、宽限后 SIGKILL；
-- stderr 收集进任务日志；退出码非零映射为 `EngineError`，由 Stage 重试策略处置；
+- 空闲超时（可配，默认 5 分钟无输出）与节点总超时，超时先发 SIGINT、宽限后 SIGKILL；
+- stderr 收集进任务日志；退出码非零映射为 `EngineError`，由节点重试策略处置；
 - token/费用统计从结果事件提取，累计到任务预算。
 
 ### 4.3 结构化产出约定
 
-评审等需要结构化输出的 Stage，通过 prompt 约定引擎输出 JSON（写入指定文件而非 stdout，避免流式文本污染），内核用 zod schema 校验；校验失败自动追加一轮"格式修正" prompt（最多 2 次），仍失败按 Stage 失败处理。
+`review` 原语等需要结构化输出的节点，通过 prompt 约定引擎输出 JSON（写入指定文件而非 stdout，避免流式文本污染），内核用 zod schema 校验；校验失败自动追加一轮"格式修正" prompt（最多 2 次），仍失败按节点失败处理。
 
 ```ts
 export interface ReviewComment {
@@ -228,7 +296,7 @@ export interface ReviewComment {
   severity: "blocker" | "major" | "minor" | "nit";
   comment: string;
   suggestion?: string;
-  status: "open" | "fixed" | "rejected";   // FixReview 更新
+  status: "open" | "fixed" | "rejected";   // 修正节点(fixReview)更新
   rejectReason?: string;
 }
 ```
@@ -240,9 +308,12 @@ export interface ReviewComment {
 ```
 .codeloop/
 ├── config.yaml
+├── pipelines/                 # 自定义 pipeline 模板(内置模板随内核发布)
+│   └── my-loop.yaml
 ├── kernel.db                  # SQLite: tasks / checkpoints / interventions / usage
 ├── worktrees/<taskId>/        # 任务工作区
 └── tasks/<taskId>/
+    ├── pipeline.snapshot.yaml # 任务创建时固化的 pipeline 定义(见 2.3)
     ├── events.jsonl           # append-only 全量事件流(审计源)
     ├── artifacts/
     │   ├── plan.md
@@ -269,21 +340,23 @@ export interface KernelEvent<T = unknown> {
 
 export type KernelEventType =
   // 任务生命周期
-  | "task.created" | "task.started" | "task.suspended"
+  | "task.created"             // { requirement, pipeline: { name, hash } }  含 pipeline 快照信息
+  | "task.started" | "task.suspended"
   | "task.resumed" | "task.aborted" | "task.completed" | "task.failed"
-  // Stage
-  | "stage.started"            // { stage, iteration }
-  | "stage.completed"          // { stage, result, artifactIds }
-  | "stage.retrying"           // { stage, attempt, error }
+  // 节点与循环(消费方按 pipeline 快照渲染进度)
+  | "node.started"             // { nodeId, primitive, loopStack: [{ loopId, iteration }] }
+  | "node.completed"           // { nodeId, outcome, artifactIds }
+  | "node.retrying"            // { nodeId, attempt, error }
+  | "loop.iteration"           // { loopId, iteration, maxIterations }
   // 引擎过程(细粒度进度, UI 实时渲染用)
-  | "engine.chunk"             // { stage, chunk: EngineChunk }
-  | "engine.turn.completed"    // { stage, usage }
+  | "engine.chunk"             // { nodeId, chunk: EngineChunk }
+  | "engine.turn.completed"    // { nodeId, usage }
   // 产物与代码
-  | "artifact.created"         // { artifactId, kind, path }
+  | "artifact.created"         // { artifactId, key, kind, path }
   | "git.commit"               // { sha, message, author: "engine" | "human" }
   // 评审与介入
-  | "review.completed"         // { stage, comments: ReviewComment[], passed }
-  | "intervention.required"    // { requestId, stage, kind: "gate" | "limit" | "error", summary }
+  | "review.completed"         // { nodeId, comments: ReviewComment[], passed }
+  | "intervention.required"    // { requestId, nodeId, kind: "gate" | "limit" | "error", summary }
   | "intervention.resolved"    // { requestId, decision }
   | "instruction.injected"     // { text, by }
   // 预算
@@ -292,7 +365,7 @@ export type KernelEventType =
 
 约定：
 
-- `engine.chunk` 量大，事件流订阅可带 `?verbose=false` 过滤，只留 Stage 级事件；JSONL 中始终全量。
+- `engine.chunk` 量大，事件流订阅可带 `?verbose=false` 过滤，只留节点级事件；JSONL 中始终全量。
 - 消费方通过 `seq` 做幂等与断线重放：`GET /tasks/:id/events?after=<seq>`。
 
 ## 7. 控制 API（`codeloop serve`）
@@ -300,9 +373,9 @@ export type KernelEventType =
 守护模式绑定本机端口（默认 `127.0.0.1:4700`，可配 token 鉴权供 L2 远程接入）：
 
 ```
-POST   /tasks                          # { requirement, repoPath, configOverrides? } → { taskId }
+POST   /tasks                          # { requirement, repoPath, pipeline?, configOverrides? } → { taskId }
 GET    /tasks                          # 任务列表(状态摘要)
-GET    /tasks/:id                      # 快照: 状态机位置/轮次/产物/git 状态/用量
+GET    /tasks/:id                      # 快照: 当前节点/loop 计数器/pipeline 定义/产物/git 状态/用量
 POST   /tasks/:id/pause
 POST   /tasks/:id/resume               # { instruction? }
 POST   /tasks/:id/abort
@@ -319,10 +392,11 @@ CLI 本地使用时不起服务，直接进程内调用内核库；`serve` 模�
 ## 8. CLI 设计
 
 ```
-codeloop run "<需求>"          # 创建并运行任务, 进入交互式进度界面
-codeloop run -f req.md --config loop.yaml --no-gate
+codeloop run "<需求>"          # 创建并运行任务(默认 default-codeloop), 进入交互式进度界面
+codeloop run -f req.md --pipeline quick-fix --no-gate
+codeloop pipelines             # 列出内置与自定义 pipeline 模板(含静态校验结果)
 codeloop list                  # 任务列表
-codeloop show <taskId>         # 任务详情(阶段/轮次/产物/用量)
+codeloop show <taskId>         # 任务详情(当前节点/轮次/产物/用量)
 codeloop watch <taskId>        # 附着到运行中任务, 实时渲染进度
 codeloop pause|resume|abort <taskId>
 codeloop approve <taskId> [--comment ...]   # 审批门决定
@@ -333,7 +407,7 @@ codeloop serve [--port 4700 --token ...]    # 守护模式(供 L2 / 远程)
 codeloop doctor                # 检查引擎 CLI 安装/登录状态
 ```
 
-交互式界面（Ink 渲染）：上方为 Stage 进度条（`Plan ✓ → PlanReview ✓ → Code ● → …` 与轮次），中间滚动引擎动作摘要（`engine.chunk` 的 toolUse/fileChange），下方状态栏显示用量/预算；到达审批门时就地弹出 approve/reject/edit 选择。
+交互式界面（Ink 渲染）：上方为按任务的 pipeline 快照动态渲染的节点进度条（`plan ✓ → planReview ✓ → code ● → …`，loop 块显示轮次 `reviewLoop 2/5`），中间滚动引擎动作摘要（`engine.chunk` 的 toolUse/fileChange），下方状态栏显示用量/预算；到达审批门时就地弹出 approve/reject/edit 选择。
 
 ---
 
