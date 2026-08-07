@@ -212,6 +212,7 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
         task.kernel_task_id,
         req.params.artifactId,
       );
+      if (!art) return reply.code(404).send({ error: "artifact not found" });
       return reply.type(art.contentType).send(art.body);
     },
   );

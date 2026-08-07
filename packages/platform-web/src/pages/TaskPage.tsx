@@ -13,33 +13,74 @@ export function TaskPage() {
   const [rejectText, setRejectText] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const reload = async () => {
+  const reloadDetail = async () => {
     const detail = await api.getTask(id);
     setTask(detail.task);
     setRepo(detail.repo);
     setKernel(detail.kernel);
     const ev = await api.listEvents(id);
     setEvents(ev.events);
+  };
+
+  const tryLoadPlan = async () => {
     try {
       setPlan(await api.artifact(id, "planDoc"));
     } catch {
-      setPlan(null);
+      // planDoc 尚未产出时保持现状，避免用 null 冲掉已有内容
     }
   };
 
   useEffect(() => {
-    void reload().catch((e: Error) => setError(e.message));
+    setPlan(null);
+    void reloadDetail()
+      .then(() => tryLoadPlan())
+      .catch((e: Error) => setError(e.message));
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleDetail = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void reloadDetail().catch(() => undefined);
+      }, 400);
+    };
+
     const off = connectHub((msg) => {
       if (msg.type === "task.updated") {
         const t = msg.payload as Task;
-        if (t.id === id) void reload();
+        if (t.id === id) {
+          setTask(t);
+          scheduleDetail();
+        }
       }
       if (msg.type === "task.event") {
-        const p = msg.payload as { taskId: string };
-        if (p.taskId === id) void reload();
+        const p = msg.payload as {
+          taskId: string;
+          event?: { type?: string; seq?: number; ts?: string; payload?: unknown };
+        };
+        if (p.taskId !== id) return;
+        if (p.event?.seq != null && p.event.type) {
+          const row: TaskEvent = {
+            task_id: id,
+            seq: p.event.seq,
+            ts: p.event.ts ?? new Date().toISOString(),
+            type: p.event.type,
+            payload:
+              typeof p.event.payload === "string"
+                ? p.event.payload
+                : JSON.stringify(p.event.payload ?? {}),
+          };
+          setEvents((prev) => (prev.some((e) => e.seq === row.seq) ? prev : [...prev, row]));
+        }
+        // planDoc 仅在节点完成时尝试拉取，避免事件风暴刷 404
+        if (p.event?.type === "node.completed" || p.event?.type === "task.completed") {
+          void tryLoadPlan();
+        }
       }
     });
-    return off;
+    return () => {
+      if (timer) clearTimeout(timer);
+      off();
+    };
   }, [id]);
 
   const pendingReqId = (() => {
@@ -51,7 +92,8 @@ export function TaskPage() {
     setError(null);
     try {
       await fn();
-      await reload();
+      await reloadDetail();
+      await tryLoadPlan();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

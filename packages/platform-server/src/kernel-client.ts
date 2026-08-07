@@ -76,10 +76,14 @@ export class KernelClient {
     return data.events;
   }
 
-  async artifact(taskId: string, artifactId: string): Promise<{ contentType: string; body: string }> {
+  async artifact(
+    taskId: string,
+    artifactId: string,
+  ): Promise<{ contentType: string; body: string } | null> {
     const res = await fetch(`${this.endpoint}/tasks/${taskId}/artifacts/${artifactId}`, {
       headers: this.headers(),
     });
+    if (res.status === 404) return null;
     if (!res.ok) throw new Error(`kernel artifact: ${res.status}`);
     return {
       contentType: res.headers.get("content-type") ?? "text/plain",

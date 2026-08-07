@@ -9,8 +9,7 @@
     "codeloop": "pnpm --filter @devtools/cli exec node ./dist/index.js",
     "platform:server": "pnpm --filter @devtools/platform-server start",
     "platform:web": "pnpm --filter @devtools/platform-web dev",
-    "platform:build": "pnpm --filter @devtools/platform-web build && pnpm --filter @devtools/platform-server build",
-    "e2e:platform": "node tmp/e2e/run.mjs"
+    "platform:build": "pnpm --filter @devtools/platform-web build && pnpm --filter @devtools/platform-server build"
   },
   "engines": {
     "node": ">=22"
