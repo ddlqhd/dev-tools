@@ -29,7 +29,7 @@
 
 内核自身**不直接调用 LLM API**，编码/评审等智能环节全部通过 **Engine Adapter** 委托给现有的编码 Agent CLI：
 
-- Cursor CLI（`cursor-agent`）
+- Cursor CLI（`agent -p --output-format stream-json`）
 - Claude Code（`claude -p --output-format stream-json`）
 - Codex CLI（`codex exec`）
 
@@ -83,7 +83,7 @@ flowchart TB
         Kernel --> Engine
         Kernel --> Store
         Kernel --> WT
-        Engine -->|子进程 stream-json| AgentCLI[Cursor CLI / Claude Code / Codex CLI]
+        Engine -->|子进程 stream-json| AgentCLI[agent / Claude Code / Codex CLI]
     end
 
     Human[开发者] -->|codeloop CLI 直接使用| Kernel

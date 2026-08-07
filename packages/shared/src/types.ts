@@ -1,0 +1,36 @@
+export type EngineType = "cursor" | "claude-code" | "codex";
+
+export type EngineChunk =
+  | { kind: "text"; text: string }
+  | { kind: "toolUse"; tool: string; summary: string }
+  | { kind: "fileChange"; path: string; op: "create" | "edit" | "delete" }
+  | { kind: "raw"; type: string; data: unknown };
+
+export interface EngineTurnUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd?: number;
+}
+
+export interface EngineTurnResult {
+  text: string;
+  usage?: EngineTurnUsage;
+  filesChanged: string[];
+  sessionId?: string;
+}
+
+export type NodePrimitive = "agent" | "review" | "gate" | "command" | "commit";
+
+export type InterventionDecision =
+  | { action: "approve" }
+  | { action: "reject"; comments: import("./review.js").ReviewComment[] }
+  | { action: "edit"; note: string };
+
+export type InterventionKind = "gate" | "limit" | "error";
+
+export interface InterventionRequest {
+  requestId: string;
+  nodeId: string;
+  kind: InterventionKind;
+  summary: string;
+}

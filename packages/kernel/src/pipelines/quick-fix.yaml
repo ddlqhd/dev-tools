@@ -1,0 +1,34 @@
+version: 1
+pipeline: quick-fix
+
+nodes:
+  code:
+    type: agent
+    engine: default
+    promptTemplate: code
+  codeReview:
+    type: review
+    engine: reviewer
+    severityGate: major
+    outputs: [reviewComments]
+  fixReview:
+    type: agent
+    engine: default
+    inputs: [reviewComments]
+    promptTemplate: fix
+  verify:
+    type: command
+    run: ["pnpm lint", "pnpm test"]
+  commit:
+    type: commit
+    messageStyle: conventional
+
+flow:
+  - code
+  - loop:
+      id: reviewLoop
+      maxIterations: 5
+      body: [codeReview, fixReview]
+      until: codeReview.passed
+  - verify
+  - commit

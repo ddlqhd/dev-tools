@@ -181,10 +181,10 @@ pipelineOverrides:               # 不改模板的轻量覆盖(仅允许节点�
   verify:   { run: ["pnpm lint", "pnpm test -- --changed"] }
 engines:
   default:
-    type: claude-code            # claude-code | cursor-cli | codex
+    type: cursor                 # cursor | claude-code | codex（cursor 启动命令为 agent）
     model: sonnet
   reviewer:
-    type: codex                  # 评审用不同引擎, 避免自审偏差
+    type: cursor                 # M1 可与编码同引擎; 后续可换引擎避免自审偏差
 budget:
   maxEngineCalls: 60
   nodeTimeoutMinutes: 30
@@ -231,7 +231,7 @@ Checkpoint 内容 = 当前节点 id + 各层 loop 计数器栈 + worktree 的 HE
 ```ts
 // packages/kernel/src/engines/adapter.ts
 export interface EngineAdapter {
-  readonly type: EngineType;                 // "claude-code" | "cursor-cli" | "codex"
+  readonly type: EngineType;                 // "claude-code" | "cursor" | "codex"
   probe(): Promise<EngineInfo>;              // 检查 CLI 是否安装/登录, 版本
   createSession(opts: SessionOptions): Promise<EngineSession>;
   resumeSession(sessionId: string, opts: SessionOptions): Promise<EngineSession>;
@@ -272,7 +272,7 @@ export interface EngineTurnResult {
 | 引擎 | 调用方式（示意） | 会话续接 |
 |---|---|---|
 | Claude Code | `claude -p <prompt> --output-format stream-json --permission-mode ...` | `--resume <session-id>` |
-| Cursor CLI | `cursor-agent -p <prompt> --output-format stream-json` | `--resume <chat-id>` |
+| Cursor CLI | `agent -p <prompt> --output-format stream-json --trust`（只读加 `--mode plan`，可写加 `--force`） | `--resume <chat-id>` |
 | Codex CLI | `codex exec <prompt> --json --sandbox workspace-write` | `codex exec resume <session-id>` |
 
 > 各 CLI 参数随版本演进，Adapter 实现时以 `probe()` 探测到的版本对应的 `--help` 为准，参数表集中维护在各 Adapter 文件顶部。

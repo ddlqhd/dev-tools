@@ -1,0 +1,59 @@
+version: 1
+pipeline: default-codeloop
+
+nodes:
+  plan:
+    type: agent
+    engine: default
+    readonly: true
+    promptTemplate: plan
+    outputs: [planDoc]
+  planReview:
+    type: review
+    engine: reviewer
+    inputs: [planDoc]
+    outputs: [planComments]
+    severityGate: major
+  planGate:
+    type: gate
+    timeout: 24h
+  code:
+    type: agent
+    engine: default
+    inputs: [planDoc]
+    promptTemplate: code
+  codeReview:
+    type: review
+    engine: reviewer
+    severityGate: major
+    outputs: [reviewComments]
+  fixReview:
+    type: agent
+    engine: default
+    inputs: [reviewComments]
+    promptTemplate: fix
+  verify:
+    type: command
+    run: ["pnpm lint", "pnpm test"]
+    onFail:
+      goto: reviewLoop
+      asComment: blocker
+  commit:
+    type: commit
+    messageStyle: conventional
+
+flow:
+  - loop:
+      id: planLoop
+      maxIterations: 3
+      body: [plan, planReview]
+      until: planReview.passed
+  - planGate
+  - code
+  - loop:
+      id: reviewLoop
+      maxIterations: 5
+      body: [codeReview, fixReview]
+      until: codeReview.passed
+  - verify
+  - commit

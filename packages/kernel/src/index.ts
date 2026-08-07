@@ -1,0 +1,10 @@
+export { createAndRunTask, doctor, listTasks, getTask } from "./task.js";
+export type { CreateAndRunOptions, TaskRunResult } from "./task.js";
+export { loadConfig, ensureCodeloopDir, DEFAULT_CONFIG_YAML } from "./config.js";
+export type { CodeloopConfig } from "./config.js";
+export { loadPipeline, listBuiltinPipelines, parsePipelineYaml } from "./pipeline/load.js";
+export { CursorAdapter, CURSOR_BIN } from "./engines/cursor/index.js";
+export { getEngineAdapter, resolveEngineType } from "./engines/registry.js";
+export { PipelineInterpreter } from "./loop/interpreter.js";
+export { KernelStore, EventLog, ArtifactStore } from "./store/index.js";
+export type { EngineAdapter, EngineSession, EngineInfo } from "./engines/adapter.js";

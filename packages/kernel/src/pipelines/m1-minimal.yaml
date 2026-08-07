@@ -1,0 +1,24 @@
+version: 1
+pipeline: m1-minimal
+
+# M1 最小闭环: plan → code → commit（跳过评审门与验证，便于先跑通引擎）
+nodes:
+  plan:
+    type: agent
+    engine: default
+    readonly: true
+    promptTemplate: plan
+    outputs: [planDoc]
+  code:
+    type: agent
+    engine: default
+    inputs: [planDoc]
+    promptTemplate: code
+  commit:
+    type: commit
+    messageStyle: conventional
+
+flow:
+  - plan
+  - code
+  - commit
