@@ -16,13 +16,14 @@ import {
   KernelRuntime,
 } from "@devtools/kernel";
 import type { InterventionDecision, InterventionRequest, KernelEvent, ReviewComment } from "@devtools/shared";
+import { VERSION } from "./version.js";
 
 const program = new Command();
 
 program
   .name("codeloop")
   .description("Automated AI development loop (Cursor agent engine)")
-  .version("0.2.0");
+  .version(VERSION);
 
 program
   .command("doctor")

@@ -5,14 +5,17 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "platform-server": "./dist/cli.js"
+    "codeloop-platform": "./dist/cli.js"
   },
   "files": ["dist"],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node ../../scripts/copy-assets.mjs platform-server",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node ./dist/cli.js",
     "dev": "node --watch ./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22.13"
   },
   "dependencies": {
     "@devtools/shared": "workspace:*",

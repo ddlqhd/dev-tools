@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13"
+          cache: pnpm
+
+      - name: Check tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          TAG=${GITHUB_REF_NAME#v}
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "Tag v$TAG does not match VERSION=$VERSION"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Pack release tarball
+        run: pnpm pack:release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeloop-tarball
+          path: release/artifacts/*.tgz
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          TGZ=$(ls release/artifacts/*.tgz | head -n1)
+          gh release create "v${VERSION}" "$TGZ" \
+            --title "v${VERSION}" \
+            --notes "Install:
+
+\`\`\`bash
+npm i -g ./${TGZ##*/}
+codeloop doctor
+codeloop-platform
+\`\`\`
+
+Requires Node.js ≥ 22.13, git, and Cursor Agent CLI (\`agent login\`)."

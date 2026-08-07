@@ -384,11 +384,16 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
   );
 
   const here = dirname(fileURLToPath(import.meta.url));
+  const embeddedWeb = join(here, "web");
+  const monorepoWeb = join(here, "../../platform-web/dist");
+  const cwdWeb = join(process.cwd(), "packages/platform-web/dist");
   const webPath =
     config.webDist ??
-    (existsSync(join(here, "../../platform-web/dist"))
-      ? join(here, "../../platform-web/dist")
-      : join(process.cwd(), "packages/platform-web/dist"));
+    (existsSync(embeddedWeb)
+      ? embeddedWeb
+      : existsSync(monorepoWeb)
+        ? monorepoWeb
+        : cwdWeb);
 
   if (existsSync(webPath)) {
     await app.register(fastifyStatic, { root: webPath, prefix: "/" });

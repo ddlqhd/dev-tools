@@ -191,10 +191,10 @@ dev-tools/
 
 ## 6. 部署形态
 
-按使用规模递进，三种形态使用同一套代码：
+按使用规模递进，三种形态使用同一套代码。对外分发为**单个** tarball `@devtools/codeloop`（GitHub Release 附件，暂不推 registry），装一次得到两个命令：
 
-1. **单机个人模式**：只装 CLI（`npm i -g @devtools/cli`），`codeloop run` 直接在当前仓库工作，SQLite + JSONL 落在 `.codeloop/` 目录。无任何服务。
-2. **单机团队模式**：管理系统后端 + 前端跑在一台服务器上，内核实例作为**本地子进程**由调度器拉起（每实例一个 worktree），中心 DB 用 SQLite 即可。适合小团队 / 内网。
+1. **单机个人模式**：`npm i -g ./devtools-codeloop-*.tgz` 后用 `codeloop`。`codeloop run` 直接在当前仓库工作，SQLite + JSONL 落在 `.codeloop/` 目录。无任何服务。
+2. **单机团队模式**：同一安装包用 `codeloop-platform` 起管理系统（后端 + 内嵌前端）。内核实例作为**本地子进程**由调度器拉起（每实例一个 worktree），中心 DB 用 SQLite；平台配置/数据默认落在 `~/.codeloop-platform/`。适合小团队 / 内网。
 3. **容器化模式（扩展点，第一版不实现）**：调度器的实例启动器抽象为 `InstanceLauncher` 接口，第一版实现 `LocalProcessLauncher`，后续增加 `DockerLauncher` / `K8sLauncher`，把每个内核实例连同 Agent CLI 打进容器，实现资源隔离与横向扩展。
 
 ## 7. 安全与资源边界

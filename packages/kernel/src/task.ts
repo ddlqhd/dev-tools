@@ -1,9 +1,29 @@
+import { execFile } from "node:child_process";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import type { InterventionDecision, InterventionRequest, KernelEvent } from "@devtools/shared";
 import { loadConfig, ensureCodeloopDir } from "./config.js";
 import { KernelStore } from "./store/index.js";
 import { getEngineAdapter, resolveEngineType } from "./engines/registry.js";
 import { KernelRuntime } from "./runtime/kernel-runtime.js";
+
+const execFileAsync = promisify(execFile);
+
+const MIN_NODE = { major: 22, minor: 13 };
+
+function parseNodeVersion(v: string): { major: number; minor: number; patch: number } | null {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v);
+  if (!m) return null;
+  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) };
+}
+
+function nodeVersionOk(v: string): boolean {
+  const parsed = parseNodeVersion(v);
+  if (!parsed) return false;
+  if (parsed.major > MIN_NODE.major) return true;
+  if (parsed.major < MIN_NODE.major) return false;
+  return parsed.minor >= MIN_NODE.minor;
+}
 
 export interface CreateAndRunOptions {
   requirement: string;
@@ -63,6 +83,48 @@ export async function doctor(repoPath?: string): Promise<{
   checks: Array<{ name: string; ok: boolean; detail: string }>;
 }> {
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+
+  const nodeVer = process.versions.node;
+  checks.push({
+    name: "node",
+    ok: nodeVersionOk(nodeVer),
+    detail: nodeVersionOk(nodeVer)
+      ? `v${nodeVer}`
+      : `v${nodeVer} (need >= ${MIN_NODE.major}.${MIN_NODE.minor} for node:sqlite)`,
+  });
+
+  try {
+    const sqlite = await import("node:sqlite");
+    checks.push({
+      name: "node-sqlite",
+      ok: typeof sqlite.DatabaseSync === "function",
+      detail:
+        typeof sqlite.DatabaseSync === "function"
+          ? "node:sqlite available"
+          : "DatabaseSync missing",
+    });
+  } catch (err) {
+    checks.push({
+      name: "node-sqlite",
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  try {
+    const { stdout } = await execFileAsync("git", ["--version"]);
+    checks.push({
+      name: "git",
+      ok: true,
+      detail: stdout.trim(),
+    });
+  } catch {
+    checks.push({
+      name: "git",
+      ok: false,
+      detail: "git not found in PATH",
+    });
+  }
 
   const adapter = getEngineAdapter("cursor");
   const info = await adapter.probe();

@@ -11,6 +11,9 @@
     }
   },
   "files": ["dist"],
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json && node ../../scripts/copy-assets.mjs kernel",
     "typecheck": "tsc -p tsconfig.json --noEmit"

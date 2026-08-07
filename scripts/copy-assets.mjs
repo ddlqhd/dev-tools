@@ -15,4 +15,17 @@ if (pkg === "kernel") {
   mkdirSync(dest, { recursive: true });
   cpSync(src, dest, { recursive: true });
   console.log("copied pipelines →", dest);
+} else if (pkg === "platform-server") {
+  const src = join(root, "packages/platform-web/dist");
+  const dest = join(root, "packages/platform-server/dist/web");
+  if (!existsSync(src)) {
+    console.warn("skip web copy — platform-web dist missing (run platform:build or pack:release):", src);
+    process.exit(0);
+  }
+  mkdirSync(dest, { recursive: true });
+  cpSync(src, dest, { recursive: true });
+  console.log("copied platform-web →", dest);
+} else {
+  console.error("usage: node scripts/copy-assets.mjs <kernel|platform-server>");
+  process.exit(1);
 }
