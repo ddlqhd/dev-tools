@@ -33,9 +33,9 @@ export interface SessionOptions {
    */
   artifactWriteOnly?: boolean;
   /**
-   * Sandbox for write-mode turns; defaults to enabled. Verify and commit turns
-   * need it disabled: test runners write to caches outside the workspace, and a
-   * linked worktree's git metadata lives in the main repository.
+   * Sandbox for write-mode turns; defaults to disabled. Verify and commit turns
+   * always need it disabled: test runners write to caches outside the workspace,
+   * and a linked worktree's git metadata lives in the main repository.
    */
   sandbox?: "enabled" | "disabled";
   allowedTools?: string[];

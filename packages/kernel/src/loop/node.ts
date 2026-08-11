@@ -46,6 +46,8 @@ export interface NodeContext {
 export interface RuntimeConfigView {
   autoApproveGates: boolean;
   skipVerifyIfMissing: boolean;
+  /** Sandbox write-mode engine turns; verify/commit always run unsandboxed. */
+  sandbox: boolean;
   budget: {
     maxEngineCalls: number;
     nodeTimeoutMinutes: number;

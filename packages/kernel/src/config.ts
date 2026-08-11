@@ -38,6 +38,13 @@ export const CodeloopConfigSchema = z.object({
     .default({ branchPrefix: "codeloop/", worktreeRoot: ".codeloop/worktrees" }),
   autoApproveGates: z.boolean().default(false),
   skipVerifyIfMissing: z.boolean().default(true),
+  /**
+   * Run the task in the repository itself instead of a dedicated linked worktree.
+   * Requires a clean working tree; commits land on the current branch.
+   */
+  inplace: z.boolean().default(false),
+  /** Sandbox write-mode engine turns. Verify/commit turns always run unsandboxed. */
+  sandbox: z.boolean().default(false),
 });
 
 export type CodeloopConfig = z.infer<typeof CodeloopConfigSchema>;
@@ -86,6 +93,10 @@ git:
   worktreeRoot: .codeloop/worktrees
 autoApproveGates: false
 skipVerifyIfMissing: true
+# Work directly in the repo (no worktree). Needs a clean working tree.
+inplace: false
+# Sandbox write-mode engine turns (verify/commit always run unsandboxed).
+sandbox: false
 `;
 
 export async function ensureCodeloopDir(repoPath: string): Promise<string> {

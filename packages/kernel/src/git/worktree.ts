@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
 
 const TEMP_FILES = [
   ".codeloop-plan.md",
@@ -45,6 +45,55 @@ export async function createTaskWorktree(opts: {
   await git(opts.repoPath, ["worktree", "add", "-b", branch, worktreePath, baseCommit]);
 
   return new WorktreeHandle(opts.repoPath, worktreePath, branch, baseCommit);
+}
+
+/**
+ * Inplace mode: operate on the repository checkout itself. Pause/rollback uses
+ * `reset --hard` + `clean -fd`, so pre-existing uncommitted work is refused
+ * rather than silently destroyed.
+ */
+export async function createInplaceWorktree(repoPath: string): Promise<GitWorktree> {
+  await excludeCodeloopState(repoPath);
+
+  const status = await git(repoPath, ["status", "--porcelain"]);
+  if (status.trim()) {
+    throw new Error(
+      `Inplace mode needs a clean working tree — commit or stash first:\n${status.trim()}`,
+    );
+  }
+
+  const branch = (await git(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+  if (branch === "HEAD") {
+    throw new Error("Inplace mode needs a checked-out branch (repo is in detached HEAD)");
+  }
+  const baseCommit = (await git(repoPath, ["rev-parse", "HEAD"])).trim();
+
+  return new WorktreeHandle(repoPath, repoPath, branch, baseCommit);
+}
+
+/**
+ * Inplace mode shares its checkout with `.codeloop/`, so the state directory has
+ * to be invisible to git: otherwise `add -A` commits it and `clean -fd` deletes
+ * the running task's own store. Uses `.git/info/exclude` to leave the
+ * repository's tracked `.gitignore` alone.
+ */
+async function excludeCodeloopState(repoPath: string): Promise<void> {
+  const gitCommonDir = (await git(repoPath, ["rev-parse", "--git-common-dir"])).trim();
+  const gitDir = isAbsolute(gitCommonDir) ? gitCommonDir : join(repoPath, gitCommonDir);
+  const excludePath = join(gitDir, "info", "exclude");
+
+  let content = "";
+  try {
+    content = await readFile(excludePath, "utf8");
+  } catch {
+    // no exclude file yet
+  }
+  const patterns = new Set(["/.codeloop/", ".codeloop/", ".codeloop"]);
+  if (content.split("\n").some((line) => patterns.has(line.trim()))) return;
+
+  await mkdir(dirname(excludePath), { recursive: true });
+  const prefix = content.trim() ? `${content.trimEnd()}\n` : "";
+  await writeFile(excludePath, `${prefix}/.codeloop/\n`, "utf8");
 }
 
 export async function openExistingWorktree(

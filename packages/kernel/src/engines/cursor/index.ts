@@ -81,7 +81,7 @@ class CursorSession implements EngineSession {
       readonly: this.opts.readonly ?? false,
       planMode: this.opts.planMode ?? false,
       artifactWriteOnly: this.opts.artifactWriteOnly ?? false,
-      sandbox: this.opts.sandbox ?? "enabled",
+      sandbox: this.opts.sandbox ?? "disabled",
       resume: this.sessionId || undefined,
     });
 

@@ -26,7 +26,7 @@ export class KernelClient {
     requirement: string;
     repoPath?: string;
     pipeline?: string;
-    configOverrides?: { autoApproveGates?: boolean };
+    configOverrides?: { autoApproveGates?: boolean; inplace?: boolean; sandbox?: boolean };
   }): Promise<{ taskId: string; branch: string }> {
     const res = await fetch(`${this.endpoint}/tasks`, {
       method: "POST",

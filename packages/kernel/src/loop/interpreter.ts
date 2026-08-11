@@ -516,7 +516,7 @@ export class PipelineInterpreter {
       readonly,
       planMode,
       artifactWriteOnly,
-      sandbox: drivesTooling ? "disabled" : "enabled",
+      sandbox: !drivesTooling && this.opts.config.sandbox ? "enabled" : "disabled",
       nodeTimeoutMs: this.opts.config.budget.nodeTimeoutMinutes * 60_000,
       signal: this.opts.signal,
     });

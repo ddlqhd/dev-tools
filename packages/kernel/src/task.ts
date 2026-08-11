@@ -31,6 +31,10 @@ export interface CreateAndRunOptions {
   repoPath: string;
   pipeline?: string;
   autoApproveGates?: boolean;
+  /** Run in the repo checkout instead of a dedicated worktree. */
+  inplace?: boolean;
+  /** Sandbox write-mode engine turns. */
+  sandbox?: boolean;
   onIntervention?: (req: InterventionRequest) => Promise<InterventionDecision>;
   onEvent?: (event: KernelEvent) => void;
   signal?: AbortSignal;
@@ -52,6 +56,8 @@ export async function createAndRunTask(opts: CreateAndRunOptions): Promise<TaskR
       repoPath: opts.repoPath,
       pipeline: opts.pipeline,
       autoApproveGates: opts.autoApproveGates,
+      inplace: opts.inplace,
+      sandbox: opts.sandbox,
       onEvent: opts.onEvent,
     });
 

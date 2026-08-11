@@ -102,6 +102,8 @@ program
   .option("--repo <path>", "repo path", process.cwd())
   .option("--pipeline <name>", "pipeline template (default: from config)")
   .option("--no-gate", "auto-approve gate nodes")
+  .option("--inplace", "work in the repo itself instead of a git worktree")
+  .option("--sandbox", "sandbox write-mode engine turns")
   .option("--quiet", "less event output")
   .action(
     async (
@@ -111,6 +113,8 @@ program
         repo: string;
         pipeline?: string;
         gate?: boolean;
+        inplace?: boolean;
+        sandbox?: boolean;
         quiet?: boolean;
       },
     ) => {
@@ -134,7 +138,11 @@ program
           requirement: text,
           repoPath,
           pipeline: opts.pipeline,
-          configOverrides: { autoApproveGates: autoApprove },
+          configOverrides: {
+            autoApproveGates: autoApprove,
+            inplace: opts.inplace,
+            sandbox: opts.sandbox,
+          },
         })) as { taskId: string; branch: string };
         console.log(`task: ${created.taskId} (via serve ${lock.host}:${lock.port})`);
         console.log(`branch: ${created.branch}`);
@@ -160,6 +168,8 @@ program
         repoPath,
         pipeline: opts.pipeline,
         autoApproveGates: autoApprove,
+        inplace: opts.inplace,
+        sandbox: opts.sandbox,
         signal: ac.signal,
         onIntervention: autoApprove ? undefined : promptIntervention,
         onEvent: (event) => {
@@ -176,7 +186,11 @@ program
       console.log(`task: ${result.taskId}`);
       console.log(`status: ${result.status}`);
       console.log(`branch: ${result.branch}`);
-      console.log(`worktree: ${result.worktreePath}`);
+      console.log(
+        result.worktreePath === repoPath
+          ? `worktree: (inplace) ${result.worktreePath}`
+          : `worktree: ${result.worktreePath}`,
+      );
       if (result.error) console.error(`error: ${result.error}`);
       process.exit(result.status === "completed" ? 0 : 1);
     },

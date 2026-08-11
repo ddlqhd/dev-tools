@@ -179,7 +179,11 @@ async function handleHttp(
         requirement: string;
         repoPath?: string;
         pipeline?: string;
-        configOverrides?: { autoApproveGates?: boolean };
+        configOverrides?: {
+          autoApproveGates?: boolean;
+          inplace?: boolean;
+          sandbox?: boolean;
+        };
       }>(req);
       if (!body.requirement) {
         json(res, 400, { error: "requirement required" });
@@ -190,6 +194,8 @@ async function handleHttp(
         repoPath: body.repoPath ?? runtime.repoPath,
         pipeline: body.pipeline,
         autoApproveGates: body.configOverrides?.autoApproveGates,
+        inplace: body.configOverrides?.inplace,
+        sandbox: body.configOverrides?.sandbox,
         parkInterventions: true,
       });
       // Fire and forget — control via API

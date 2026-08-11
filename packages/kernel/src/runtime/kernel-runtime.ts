@@ -21,6 +21,7 @@ import {
   type LoadedPipeline,
 } from "../pipeline/load.js";
 import {
+  createInplaceWorktree,
   createTaskWorktree,
   openExistingWorktree,
   type GitWorktree,
@@ -38,6 +39,10 @@ export interface CreateTaskOptions {
   repoPath: string;
   pipeline?: string;
   autoApproveGates?: boolean;
+  /** Run in the repo checkout instead of a dedicated worktree. */
+  inplace?: boolean;
+  /** Sandbox write-mode engine turns. */
+  sandbox?: boolean;
   onEvent?: (event: KernelEvent) => void;
   /**
    * When true, interventions without a handler park until `applyIntervention`
@@ -437,10 +442,29 @@ export class KernelRuntime {
     return this.store.listTasks();
   }
 
+  /** An unfinished task whose working tree is the repo checkout itself. */
+  private findActiveInplaceTask(repoPath: string): TaskRow | undefined {
+    const unfinished = new Set(["created", "running", "suspended"]);
+    return this.store
+      .listTasks()
+      .find(
+        (t) =>
+          t.repo_path === repoPath &&
+          t.worktree_path === repoPath &&
+          unfinished.has(t.status),
+      );
+  }
+
   async createTask(opts: CreateTaskOptions): Promise<TaskHandle> {
     const config = await loadConfig(opts.repoPath);
     if (opts.autoApproveGates !== undefined) {
       config.autoApproveGates = opts.autoApproveGates;
+    }
+    if (opts.inplace !== undefined) {
+      config.inplace = opts.inplace;
+    }
+    if (opts.sandbox !== undefined) {
+      config.sandbox = opts.sandbox;
     }
 
     const pipelineName = opts.pipeline ?? config.pipeline;
@@ -455,18 +479,33 @@ export class KernelRuntime {
       );
     }
 
+    if (config.inplace) {
+      const active = this.findActiveInplaceTask(opts.repoPath);
+      if (active) {
+        throw new Error(
+          `Task ${active.id} is already running inplace in ${opts.repoPath} (status ${active.status}). ` +
+            `Finish or abort it before starting another inplace task.`,
+        );
+      }
+    }
+
     const taskId = randomUUID().slice(0, 8);
     const dirs = await this.store.ensureTaskDirs(taskId);
     await snapshotPipeline(pipeline, dirs.taskDir);
 
-    const worktreeRoot = join(opts.repoPath, config.git.worktreeRoot);
-    const worktree = await createTaskWorktree({
-      repoPath: opts.repoPath,
-      worktreeRoot,
-      branchPrefix: config.git.branchPrefix,
-      taskId,
-    });
-    await linkRepoNodeModules(opts.repoPath, worktree.worktreePath);
+    let worktree: GitWorktree;
+    if (config.inplace) {
+      worktree = await createInplaceWorktree(opts.repoPath);
+    } else {
+      const worktreeRoot = join(opts.repoPath, config.git.worktreeRoot);
+      worktree = await createTaskWorktree({
+        repoPath: opts.repoPath,
+        worktreeRoot,
+        branchPrefix: config.git.branchPrefix,
+        taskId,
+      });
+      await linkRepoNodeModules(opts.repoPath, worktree.worktreePath);
+    }
 
     const now = new Date().toISOString();
     this.store.insertTask({
@@ -494,6 +533,7 @@ export class KernelRuntime {
       pipeline: { name: pipeline.name, hash: pipeline.hash },
       repoPath: opts.repoPath,
       branch: worktree.branch,
+      inplace: config.inplace,
     });
 
     const handle = new TaskHandle(
@@ -602,6 +642,7 @@ function toRuntimeConfig(config: CodeloopConfig): RuntimeConfigView {
   return {
     autoApproveGates: config.autoApproveGates,
     skipVerifyIfMissing: config.skipVerifyIfMissing,
+    sandbox: config.sandbox,
     budget: config.budget,
     engines: config.engines,
   };
