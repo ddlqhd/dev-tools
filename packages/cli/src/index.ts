@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Command } from "commander";
@@ -15,7 +13,21 @@ import {
   readKernelLock,
   KernelRuntime,
 } from "@devtools/kernel";
-import type { InterventionDecision, InterventionRequest, KernelEvent, ReviewComment } from "@devtools/shared";
+import type { TaskRunResult } from "@devtools/kernel";
+import type {
+  InterventionDecision,
+  InterventionRequest,
+  KernelEvent,
+  ReviewComment,
+} from "@devtools/shared";
+import {
+  PlainRenderer,
+  printRunHeader,
+  printRunSummary,
+  promptPlainIntervention,
+} from "./plain.js";
+import { isTerminalEvent, TuiSession } from "./ui/session.js";
+import type { TaskUiStatus } from "./ui/reducer.js";
 import { VERSION } from "./version.js";
 
 const program = new Command();
@@ -84,6 +96,9 @@ program
     if (lock) {
       const snap = await apiGet(lock, `/tasks/${taskId}`);
       console.log(JSON.stringify(snap, null, 2));
+      // stderr keeps stdout parseable as JSON
+      const tokenQ = lock.token ? `?token=${encodeURIComponent(lock.token)}` : "";
+      console.error(`trace: http://${lock.host}:${lock.port}/tasks/${taskId}/view${tokenQ}`);
       return;
     }
     const task = getTask(repo, taskId);
@@ -105,6 +120,7 @@ program
   .option("--inplace", "work in the repo itself instead of a git worktree")
   .option("--sandbox", "sandbox write-mode engine turns")
   .option("--quiet", "less event output")
+  .option("--plain", "disable the interactive TUI")
   .action(
     async (
       requirement: string | undefined,
@@ -116,6 +132,7 @@ program
         inplace?: boolean;
         sandbox?: boolean;
         quiet?: boolean;
+        plain?: boolean;
       },
     ) => {
       let text = requirement ?? "";
@@ -130,6 +147,7 @@ program
 
       const repoPath = resolve(opts.repo);
       const autoApprove = opts.gate === false;
+      const useTui = !opts.plain && isInteractiveTerminal();
 
       // If daemon is running, create task via API
       const lock = await readKernelLock(repoPath);
@@ -144,55 +162,39 @@ program
             sandbox: opts.sandbox,
           },
         })) as { taskId: string; branch: string };
+        if (useTui) {
+          const status = await watchRemoteTask({
+            taskId: created.taskId,
+            repoPath,
+            after: 0,
+            quiet: opts.quiet,
+            lock,
+          });
+          if (isTerminalStatus(status)) {
+            process.exitCode = status === "completed" ? 0 : 1;
+          }
+          return;
+        }
         console.log(`task: ${created.taskId} (via serve ${lock.host}:${lock.port})`);
         console.log(`branch: ${created.branch}`);
         console.log("Use: codeloop watch <taskId>");
         return;
       }
 
-      console.log(`repo: ${repoPath}`);
-      console.log(`pipeline: ${opts.pipeline ?? "(config default)"}`);
-      console.log(`requirement: ${text.slice(0, 120)}${text.length > 120 ? "…" : ""}`);
-      console.log("---");
-
-      const ac = new AbortController();
-      const onSig = () => {
-        console.log("\nInterrupt — aborting…");
-        ac.abort();
-      };
-      process.on("SIGINT", onSig);
-      process.on("SIGTERM", onSig);
-
-      const result = await createAndRunTask({
+      const runOptions: LocalRunOptions = {
         requirement: text,
         repoPath,
         pipeline: opts.pipeline,
         autoApproveGates: autoApprove,
         inplace: opts.inplace,
         sandbox: opts.sandbox,
-        signal: ac.signal,
-        onIntervention: autoApprove ? undefined : promptIntervention,
-        onEvent: (event) => {
-          if (opts.quiet && event.type === "engine.chunk") return;
-          printEvent(event);
-        },
-      });
-
-      process.off("SIGINT", onSig);
-      process.off("SIGTERM", onSig);
-
-      endStream();
-      console.log("---");
-      console.log(`task: ${result.taskId}`);
-      console.log(`status: ${result.status}`);
-      console.log(`branch: ${result.branch}`);
-      console.log(
-        result.worktreePath === repoPath
-          ? `worktree: (inplace) ${result.worktreePath}`
-          : `worktree: ${result.worktreePath}`,
-      );
-      if (result.error) console.error(`error: ${result.error}`);
-      process.exit(result.status === "completed" ? 0 : 1);
+        quiet: opts.quiet,
+      };
+      const result = useTui
+        ? await runLocalWithTui(runOptions)
+        : await runLocalPlain(runOptions);
+      printRunSummary(result, repoPath);
+      process.exitCode = result.status === "completed" ? 0 : 1;
     },
   );
 
@@ -237,39 +239,56 @@ program
   .description("Attach to a running/suspended task and stream events")
   .option("--repo <path>", "repo path", process.cwd())
   .option("--after <seq>", "replay events after seq", "0")
-  .action(async (taskId: string, opts: { repo: string; after: string }) => {
-    const repo = resolve(opts.repo);
-    const lock = await readKernelLock(repo);
-    if (!lock) {
-      console.error("No kernel daemon (codeloop serve). Showing historical events from disk…");
-      const runtime = await KernelRuntime.open(repo);
-      try {
-        const handle = await runtime.attachTask(taskId);
-        const events = await handle.events.readAfter(Number(opts.after));
-        for (const e of events) printEvent(e);
-      } finally {
-        runtime.close();
+  .option("--quiet", "hide engine output")
+  .option("--plain", "disable the interactive TUI")
+  .action(
+    async (
+      taskId: string,
+      opts: { repo: string; after: string; quiet?: boolean; plain?: boolean },
+    ) => {
+      const repo = resolve(opts.repo);
+      const lock = await readKernelLock(repo);
+      if (!lock) {
+        console.error("No kernel daemon (codeloop serve). Showing historical events from disk…");
+        const runtime = await KernelRuntime.open(repo);
+        const plain = new PlainRenderer();
+        try {
+          const handle = await runtime.attachTask(taskId);
+          const events = await handle.events.readAfter(parseSequence(opts.after));
+          for (const event of events) {
+            if (opts.quiet && event.type === "engine.chunk") continue;
+            plain.print(event);
+          }
+        } finally {
+          plain.end();
+          runtime.close();
+        }
+        return;
       }
-      return;
-    }
-    const { default: WebSocket } = await import("ws");
-    const tokenQ = lock.token ? `&token=${encodeURIComponent(lock.token)}` : "";
-    const ws = new WebSocket(
-      `ws://${lock.host}:${lock.port}/tasks/${taskId}/stream?verbose=true&after=${opts.after}${tokenQ}`,
-    );
-    ws.on("message", (data) => {
-      try {
-        printEvent(JSON.parse(String(data)) as KernelEvent);
-      } catch {
-        console.log(String(data));
+      if (!opts.plain && isInteractiveTerminal()) {
+        const status = await watchRemoteTask({
+          taskId,
+          repoPath: repo,
+          after: parseSequence(opts.after),
+          quiet: opts.quiet,
+          lock,
+        });
+        if (isTerminalStatus(status)) {
+          process.exitCode = status === "completed" ? 0 : 1;
+        }
+        return;
       }
-    });
-    ws.on("close", () => process.exit(0));
-    ws.on("error", (err) => {
-      console.error(err.message);
-      process.exit(1);
-    });
-  });
+      const status = await watchRemotePlain({
+        taskId,
+        after: parseSequence(opts.after),
+        quiet: opts.quiet,
+        lock,
+      });
+      if (isTerminalStatus(status)) {
+        process.exitCode = status === "completed" ? 0 : 1;
+      }
+    },
+  );
 
 for (const action of ["pause", "resume", "abort"] as const) {
   program
@@ -405,48 +424,189 @@ async function resolveDecision(
   }
 }
 
-async function promptIntervention(req: InterventionRequest): Promise<InterventionDecision> {
-  endStream();
-  console.log("");
-  console.log(`── Intervention required (${req.kind}) @ ${req.nodeId}`);
-  console.log(`   ${req.summary}`);
-  console.log(`   requestId=${req.requestId}`);
-  const rl = createInterface({ input, output });
+interface LocalRunOptions {
+  requirement: string;
+  repoPath: string;
+  pipeline?: string;
+  autoApproveGates: boolean;
+  inplace?: boolean;
+  sandbox?: boolean;
+  quiet?: boolean;
+}
+
+interface KernelEndpoint {
+  host: string;
+  port: number;
+  token?: string;
+}
+
+interface RemoteWatchOptions {
+  taskId: string;
+  after: number;
+  quiet?: boolean;
+  lock: KernelEndpoint;
+}
+
+interface InteractiveRemoteWatchOptions extends RemoteWatchOptions {
+  repoPath: string;
+}
+
+interface TaskSnapshot {
+  task: {
+    id: string;
+    requirement: string;
+    repo_path: string;
+    branch: string;
+    pipeline_name: string;
+    status: "created" | "running" | "suspended" | "completed" | "failed" | "aborted";
+    current_node: string | null;
+    error: string | null;
+    created_at: string;
+  };
+  pendingIntervention?: InterventionRequest | null;
+}
+
+async function runLocalPlain(options: LocalRunOptions): Promise<TaskRunResult> {
+  printRunHeader(options.repoPath, options.pipeline, options.requirement);
+  const renderer = new PlainRenderer();
+  const controller = new AbortController();
+  const abort = () => {
+    if (controller.signal.aborted) return;
+    renderer.end();
+    console.log("\nInterrupt — aborting…");
+    controller.abort();
+  };
+  process.on("SIGINT", abort);
+  process.on("SIGTERM", abort);
   try {
-    for (;;) {
-      const answer = (await rl.question("Approve / Reject / Edit [a/r/e]? ")).trim().toLowerCase();
-      if (answer === "a" || answer === "approve" || answer === "") {
-        return { action: "approve" };
-      }
-      if (answer === "r" || answer === "reject") {
-        const message = await rl.question("Rejection comments: ");
-        return {
-          action: "reject",
-          comments: [
-            {
-              id: "cli-reject",
-              severity: "major",
-              comment: message || "Rejected",
-              status: "open",
-            },
-          ],
-        };
-      }
-      if (answer === "e" || answer === "edit") {
-        const note = await rl.question("Edit note (you should have edited worktree files): ");
-        return { action: "edit", note: note || "human edited" };
-      }
-      console.log("Please answer a, r, or e.");
-    }
+    return await createAndRunTask({
+      requirement: options.requirement,
+      repoPath: options.repoPath,
+      pipeline: options.pipeline,
+      autoApproveGates: options.autoApproveGates,
+      inplace: options.inplace,
+      sandbox: options.sandbox,
+      signal: controller.signal,
+      onIntervention: options.autoApproveGates
+        ? undefined
+        : async (request) => {
+            renderer.end();
+            return promptPlainIntervention(request, {
+              signal: controller.signal,
+              onInterrupt: abort,
+            });
+          },
+      onEvent: (event) => {
+        if (options.quiet && event.type === "engine.chunk") return;
+        renderer.print(event);
+      },
+    });
   } finally {
-    rl.close();
+    process.off("SIGINT", abort);
+    process.off("SIGTERM", abort);
+    renderer.end();
   }
 }
 
-async function apiGet(lock: { host: string; port: number; token?: string }, path: string): Promise<unknown> {
+async function runLocalWithTui(options: LocalRunOptions): Promise<TaskRunResult> {
+  const controller = new AbortController();
+  let pending:
+    | {
+        requestId: string;
+        resolve: (decision: InterventionDecision) => void;
+        reject: (error: Error) => void;
+      }
+    | undefined;
+  let aborting = false;
+  let tui: TuiSession;
+
+  const abort = () => {
+    if (aborting) return;
+    aborting = true;
+    tui.notice("warn", "Interrupt received — aborting the task…");
+    tui.store.flush();
+    pending?.reject(new Error("aborted"));
+    pending = undefined;
+    controller.abort();
+  };
+
+  tui = new TuiSession({
+    meta: {
+      mode: "run",
+      pipeline: options.pipeline ?? "(config default)",
+      repoPath: options.repoPath,
+      requirement: options.requirement,
+    },
+    quiet: options.quiet,
+    onDecision: (request, decision) => {
+      if (!pending) throw new Error("No local intervention is waiting");
+      if (pending.requestId !== request.requestId) {
+        throw new Error(
+          `Intervention mismatch: waiting=${pending.requestId}, got=${request.requestId}`,
+        );
+      }
+      const current = pending;
+      pending = undefined;
+      current.resolve(decision);
+    },
+    onCancel: abort,
+  });
+  tui.start();
+
+  const onIntervention = (request: InterventionRequest): Promise<InterventionDecision> =>
+    new Promise((resolveDecision, rejectDecision) => {
+      if (pending) {
+        rejectDecision(new Error("Another intervention is already waiting"));
+        return;
+      }
+      pending = {
+        requestId: request.requestId,
+        resolve: resolveDecision,
+        reject: rejectDecision,
+      };
+      tui.pending(request);
+    });
+
+  const onSignal = () => abort();
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  try {
+    const result = await createAndRunTask({
+      requirement: options.requirement,
+      repoPath: options.repoPath,
+      pipeline: options.pipeline,
+      autoApproveGates: options.autoApproveGates,
+      inplace: options.inplace,
+      sandbox: options.sandbox,
+      signal: controller.signal,
+      onIntervention: options.autoApproveGates ? undefined : onIntervention,
+      onEvent: (event) => tui.event(event),
+    });
+    tui.finish(result.status, result.error);
+    await tui.stop();
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    tui.finish(aborting ? "aborted" : "failed", message);
+    await tui.stop();
+    throw error;
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+  }
+}
+
+async function apiGet(
+  lock: { host: string; port: number; token?: string },
+  path: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
   const headers: Record<string, string> = {};
   if (lock.token) headers.authorization = `Bearer ${lock.token}`;
-  const res = await fetch(`http://${lock.host}:${lock.port}${path}`, { headers });
+  const res = await fetch(`http://${lock.host}:${lock.port}${path}`, {
+    headers,
+    signal: requestSignal(signal),
+  });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
@@ -455,6 +615,7 @@ async function apiPost(
   lock: { host: string; port: number; token?: string },
   path: string,
   body: unknown,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (lock.token) headers.authorization = `Bearer ${lock.token}`;
@@ -462,132 +623,290 @@ async function apiPost(
     method: "POST",
     headers,
     body: JSON.stringify(body ?? {}),
+    signal,
   });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json();
 }
 
-const DIM = "\u001b[2m";
-const RESET = "\u001b[0m";
-const COLOR = process.stdout.isTTY === true;
-
-/** Assistant/thinking deltas stream inline, so track whether a line is open. */
-let streamKind: "text" | "thinking" | null = null;
-let streamAtLineStart = true;
-
-function endStream(): void {
-  if (!streamKind) return;
-  if (COLOR) process.stdout.write(RESET);
-  if (!streamAtLineStart) process.stdout.write("\n");
-  streamKind = null;
-  streamAtLineStart = true;
+function requestSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(30_000);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
-function writeStream(kind: "text" | "thinking", text: string): void {
-  if (!text) return;
-  if (streamKind !== kind) {
-    endStream();
-    streamKind = kind;
-    if (COLOR && kind === "thinking") process.stdout.write(DIM);
-  }
-  process.stdout.write(text);
-  streamAtLineStart = text.endsWith("\n");
-}
+async function watchRemoteTask(
+  options: InteractiveRemoteWatchOptions,
+): Promise<TaskUiStatus> {
+  const requests = new AbortController();
+  const snapshot = (await apiGet(
+    options.lock,
+    `/tasks/${encodeURIComponent(options.taskId)}`,
+    requests.signal,
+  )) as TaskSnapshot;
+  const status = toUiStatus(snapshot.task.status);
+  const { default: WebSocket } = await import("ws");
+  let socket: InstanceType<typeof WebSocket> | undefined;
+  let detached = false;
+  let terminal = false;
+  let tui: TuiSession;
 
-function printEvent(event: KernelEvent): void {
-  const p = event.payload as Record<string, unknown>;
-
-  if (event.type === "engine.chunk") {
-    const chunk = p.chunk as { kind: string; text?: string };
-    if (chunk.kind === "text" || chunk.kind === "thinking") {
-      writeStream(chunk.kind, chunk.text ?? "");
-      return;
+  function detach(): void {
+    if (detached) return;
+    detached = true;
+    tui.notice("info", "Detached; the task continues in the daemon.");
+    tui.store.flush();
+    requests.abort();
+    if (!socket) return;
+    if (
+      socket.readyState === WebSocket.OPEN ||
+      socket.readyState === WebSocket.CONNECTING
+    ) {
+      socket.terminate();
     }
   }
-  endStream();
 
-  switch (event.type) {
-    case "task.created":
-      console.log(`[task] created pipeline=${(p.pipeline as { name: string }).name}`);
-      break;
-    case "task.started":
-      console.log(`[task] started`);
-      break;
-    case "task.resumed":
-      console.log(`[task] resumed @ ${p.nodeId}`);
-      break;
-    case "task.suspended":
-      console.log(`[task] suspended: ${p.reason ?? ""}`);
-      break;
-    case "task.completed":
-      console.log(`[task] completed`);
-      break;
-    case "task.failed":
-      console.log(`[task] failed: ${p.error}`);
-      break;
-    case "task.aborted":
-      console.log(`[task] aborted`);
-      break;
-    case "node.started": {
-      const engine = p.engine ? String(p.engine) : undefined;
-      const model = p.model ? String(p.model) : undefined;
-      const meta = [engine, model].filter(Boolean).join("/");
-      console.log(`[node] ▶ ${p.nodeId} (${p.primitive}${meta ? `, ${meta}` : ""})`);
-      break;
+  tui = new TuiSession({
+    meta: {
+      mode: "watch",
+      taskId: snapshot.task.id,
+      pipeline: snapshot.task.pipeline_name,
+      branch: snapshot.task.branch,
+      repoPath: snapshot.task.repo_path || options.repoPath,
+      requirement: snapshot.task.requirement,
+      endpoint: `${options.lock.host}:${options.lock.port}`,
+    },
+    quiet: options.quiet,
+    onDecision: async (request, decision) => {
+      await apiPost(
+        options.lock,
+        `/tasks/${encodeURIComponent(options.taskId)}/interventions/${encodeURIComponent(request.requestId)}`,
+        decision,
+        requests.signal,
+      );
+    },
+    onInject: async (text) => {
+      await apiPost(
+        options.lock,
+        `/tasks/${encodeURIComponent(options.taskId)}/instructions`,
+        { text },
+        requests.signal,
+      );
+    },
+    onCancel: () => detach(),
+  });
+  tui.hydrate(status, {
+    startedAt: parseTimestamp(snapshot.task.created_at),
+    currentNode: snapshot.task.current_node ?? undefined,
+    error: snapshot.task.error ?? undefined,
+  });
+  tui.start();
+  if (snapshot.pendingIntervention) tui.pending(snapshot.pendingIntervention);
+
+  if (isTerminalStatus(status)) {
+    try {
+      const history = (await apiGet(
+        options.lock,
+        `/tasks/${encodeURIComponent(options.taskId)}/events?after=${options.after}`,
+        requests.signal,
+      )) as { events?: KernelEvent[] };
+      for (const event of history.events ?? []) tui.event(event);
+      tui.finish(status, snapshot.task.error ?? undefined);
+    } finally {
+      requests.abort();
+      await tui.stop();
     }
-    case "node.completed":
-      console.log(`[node] ✓ ${p.nodeId}`);
-      break;
-    case "node.retrying":
-      console.log(`[node] retry ${p.nodeId} attempt=${p.attempt}: ${p.error}`);
-      break;
-    case "loop.iteration":
-      console.log(`[loop] ${p.loopId} ${p.iteration}/${p.maxIterations}`);
-      break;
-    case "engine.chunk": {
-      const chunk = p.chunk as {
-        kind: string;
-        text?: string;
-        tool?: string;
-        summary?: string;
-        path?: string;
+    return status;
+  }
+
+  const token = options.lock.token
+    ? `&token=${encodeURIComponent(options.lock.token)}`
+    : "";
+  const url =
+    `ws://${options.lock.host}:${options.lock.port}` +
+    `/tasks/${encodeURIComponent(options.taskId)}/stream` +
+    `?verbose=${options.quiet ? "false" : "true"}&after=${options.after}${token}`;
+
+  try {
+    await new Promise<void>((resolveDone, rejectDone) => {
+      let settled = false;
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        resolveDone();
       };
-      if (chunk.kind === "toolUse") {
-        console.log(`  ⚙ ${chunk.tool} ${chunk.summary ?? ""}`);
-      } else if (chunk.kind === "fileChange") {
-        console.log(`  ✎ ${chunk.path}`);
-      }
-      break;
-    }
-    case "git.commit": {
-      const msg = String(p.message ?? "").split("\n")[0] ?? "";
-      console.log(`[git] commit ${(p.sha as string).slice(0, 8)} — ${msg}`);
-      break;
-    }
-    case "review.completed":
-      console.log(`[review] passed=${p.passed} comments=${(p.comments as unknown[]).length}`);
-      break;
-    case "intervention.required":
-      console.log(`[intervene] ${p.kind}: ${p.summary} (${p.requestId})`);
-      break;
-    case "intervention.resolved":
-      console.log(`[intervene] resolved ${(p.decision as { action: string }).action}`);
-      break;
-    case "instruction.injected":
-      console.log(`[inject] ${p.text}`);
-      break;
-    case "artifact.created":
-      console.log(`[artifact] ${p.key} → ${p.path}`);
-      break;
-    case "log":
-      console.log(`[log] ${p.message}`);
-      break;
-    case "budget.exceeded":
-      console.log(`[budget] exceeded`);
-      break;
-    default:
-      break;
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        rejectDone(error);
+      };
+
+      socket = new WebSocket(url);
+      socket.on("open", () => {
+        if (detached) socket?.terminate();
+      });
+      socket.on("message", (data) => {
+        try {
+          const event = JSON.parse(String(data)) as KernelEvent;
+          tui.event(event);
+          if (isTerminalEvent(event)) {
+            terminal = true;
+            socket?.close(1000, "task finished");
+          }
+        } catch (error) {
+          tui.notice(
+            "warn",
+            `Ignored malformed stream event: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      });
+      socket.on("close", () => resolveOnce());
+      socket.on("error", (error) => {
+        if (detached) {
+          resolveOnce();
+          return;
+        }
+        rejectOnce(error);
+      });
+    });
+    if (!detached && !terminal) throw new Error("Event stream closed before the task finished");
+  } catch (error) {
+    tui.notice(
+      "error",
+      `Stream error: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    tui.store.flush();
+    throw error;
+  } finally {
+    requests.abort();
+    await tui.stop();
   }
+  return tui.store.getState().status;
+}
+
+async function watchRemotePlain(options: RemoteWatchOptions): Promise<TaskUiStatus> {
+  const renderer = new PlainRenderer();
+  const snapshot = (await apiGet(
+    options.lock,
+    `/tasks/${encodeURIComponent(options.taskId)}`,
+  )) as TaskSnapshot;
+  const snapshotStatus = toUiStatus(snapshot.task.status);
+  if (isTerminalStatus(snapshotStatus)) {
+    try {
+      const history = (await apiGet(
+        options.lock,
+        `/tasks/${encodeURIComponent(options.taskId)}/events?after=${options.after}`,
+      )) as { events?: KernelEvent[] };
+      for (const event of history.events ?? []) {
+        if (options.quiet && event.type === "engine.chunk") continue;
+        renderer.print(event);
+      }
+    } finally {
+      renderer.end();
+    }
+    return snapshotStatus;
+  }
+
+  const { default: WebSocket } = await import("ws");
+  const token = options.lock.token
+    ? `&token=${encodeURIComponent(options.lock.token)}`
+    : "";
+  const verbose = options.quiet ? "false" : "true";
+  const url =
+    `ws://${options.lock.host}:${options.lock.port}` +
+    `/tasks/${encodeURIComponent(options.taskId)}/stream` +
+    `?verbose=${verbose}&after=${options.after}${token}`;
+
+  let socket: InstanceType<typeof WebSocket> | undefined;
+  let interrupted = false;
+  let terminalStatus: TaskUiStatus | undefined;
+  const interrupt = () => {
+    if (interrupted) return;
+    interrupted = true;
+    renderer.end();
+    if (
+      socket?.readyState === WebSocket.OPEN ||
+      socket?.readyState === WebSocket.CONNECTING
+    ) {
+      socket.terminate();
+    }
+  };
+  process.on("SIGINT", interrupt);
+  process.on("SIGTERM", interrupt);
+  try {
+    await new Promise<void>((resolveDone, rejectDone) => {
+      socket = new WebSocket(url);
+      let settled = false;
+      const resolveOnce = () => {
+        if (settled) return;
+        settled = true;
+        resolveDone();
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        rejectDone(error);
+      };
+      const stop = () => {
+        if (socket?.readyState === WebSocket.OPEN) socket.close(1000, "task finished");
+      };
+      socket.on("message", (data) => {
+        try {
+          const event = JSON.parse(String(data)) as KernelEvent;
+          renderer.print(event);
+          terminalStatus = statusFromTerminalEvent(event) ?? terminalStatus;
+          if (terminalStatus) stop();
+        } catch {
+          renderer.end();
+          console.log(String(data));
+        }
+      });
+      socket.on("close", () => {
+        if (interrupted || terminalStatus) resolveOnce();
+        else rejectOnce(new Error("Event stream closed before the task finished"));
+      });
+      socket.on("error", (error) => {
+        if (interrupted) resolveOnce();
+        else rejectOnce(error);
+      });
+    });
+  } finally {
+    process.off("SIGINT", interrupt);
+    process.off("SIGTERM", interrupt);
+    renderer.end();
+  }
+  return terminalStatus ?? snapshotStatus;
+}
+
+function isInteractiveTerminal(): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
+function parseSequence(value: string): number {
+  const sequence = Number(value);
+  if (!Number.isInteger(sequence) || sequence < 0) {
+    throw new Error(`Invalid --after sequence: ${value}`);
+  }
+  return sequence;
+}
+
+function parseTimestamp(value: string): number | undefined {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function toUiStatus(status: TaskSnapshot["task"]["status"]): TaskUiStatus {
+  return status === "created" ? "idle" : status;
+}
+
+function isTerminalStatus(status: TaskUiStatus): boolean {
+  return status === "completed" || status === "failed" || status === "aborted";
+}
+
+function statusFromTerminalEvent(event: KernelEvent): TaskUiStatus | undefined {
+  if (event.type === "task.completed") return "completed";
+  if (event.type === "task.failed") return "failed";
+  if (event.type === "task.aborted") return "aborted";
+  return undefined;
 }
 
 program.parseAsync(process.argv).catch((err: unknown) => {
