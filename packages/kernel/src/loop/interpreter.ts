@@ -9,7 +9,7 @@ import {
 } from "@devtools/shared";
 import { SuspendedError, type EngineAdapter, type EngineSession } from "../engines/adapter.js";
 import { getEngineAdapter, resolveEngineType } from "../engines/registry.js";
-import type { ArtifactStore, EventLog, KernelStore } from "../store/index.js";
+import type { ArtifactStore, CheckpointRow, EventLog, KernelStore } from "../store/index.js";
 import type { GitWorktree } from "../git/worktree.js";
 import { evaluateExpression } from "./expressions.js";
 import type { NodeContext, NodeRunner, RuntimeConfigView, TaskSnapshot } from "./node.js";
@@ -303,15 +303,8 @@ export class PipelineInterpreter {
     }
 
     const summary = `Loop ${step.id} reached maxIterations=${step.maxIterations}`;
-    await this.opts.events.emit("intervention.required", {
-      requestId: `limit-${step.id}`,
-      nodeId: step.id,
-      kind: "limit",
-      summary,
-    });
-    this.opts.store.updateTask(this.opts.taskId, { status: "suspended" });
     try {
-      await this.opts.requestIntervention({
+      await this.askForIntervention({
         requestId: `limit-${step.id}`,
         nodeId: step.id,
         kind: "limit",
@@ -321,6 +314,33 @@ export class PipelineInterpreter {
       // No handler / rejected — remain suspended.
     }
     throw new SuspendedError(summary);
+  }
+
+  /**
+   * Emit, persist and await one intervention. The checkpoint copy is what lets
+   * serve / CLI answer a request after the daemon that raised it is gone.
+   */
+  private async askForIntervention(req: InterventionRequest): Promise<InterventionDecision> {
+    await this.opts.events.emit("intervention.required", req);
+    this.opts.store.updateTask(this.opts.taskId, { status: "suspended" });
+    this.patchCheckpoint({ pending_intervention: JSON.stringify(req) });
+    try {
+      const decision = await this.opts.requestIntervention(req);
+      this.opts.store.updateTask(this.opts.taskId, { status: "running" });
+      this.patchCheckpoint({ pending_intervention: null });
+      return decision;
+    } catch (err) {
+      if (this.opts.getAbortIntent() === "pause") {
+        throw new SuspendedError("paused while waiting for intervention");
+      }
+      throw err;
+    }
+  }
+
+  private patchCheckpoint(patch: Partial<CheckpointRow>): void {
+    const cp = this.opts.store.getCheckpoint(this.opts.taskId);
+    if (!cp) return;
+    this.opts.store.saveCheckpoint({ ...cp, ...patch, updated_at: new Date().toISOString() });
   }
 
   private async runNode(nodeId: string, flowIndex: number) {
@@ -387,37 +407,7 @@ export class PipelineInterpreter {
       emit: async (event) => {
         await this.opts.events.emit(event.type, event.payload);
       },
-      requestIntervention: async (req) => {
-        await this.opts.events.emit("intervention.required", req);
-        this.opts.store.updateTask(this.opts.taskId, { status: "suspended" });
-        // Persist pending intervention on checkpoint for serve/CLI discovery
-        const cp = this.opts.store.getCheckpoint(this.opts.taskId);
-        if (cp) {
-          this.opts.store.saveCheckpoint({
-            ...cp,
-            pending_intervention: JSON.stringify(req),
-            updated_at: new Date().toISOString(),
-          });
-        }
-        try {
-          const decision = await this.opts.requestIntervention(req);
-          this.opts.store.updateTask(this.opts.taskId, { status: "running" });
-          if (cp) {
-            this.opts.store.saveCheckpoint({
-              ...cp,
-              pending_intervention: null,
-              updated_at: new Date().toISOString(),
-            });
-          }
-          return decision;
-        } catch (err) {
-          // If paused/aborted while waiting, surface as suspend
-          if (this.opts.getAbortIntent() === "pause") {
-            throw new SuspendedError("paused while waiting for intervention");
-          }
-          throw err;
-        }
-      },
+      requestIntervention: (req) => this.askForIntervention(req),
     };
 
     let lastError: unknown;

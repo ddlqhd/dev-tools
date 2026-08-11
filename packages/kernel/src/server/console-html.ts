@@ -60,7 +60,12 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
       padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer;
     }
     .task:hover, .task.active { background: #1e2a3c; }
-    .task .id { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+    .task .id {
+      font-family: var(--mono); font-size: 12px; color: var(--accent);
+      display: flex; gap: 8px; align-items: baseline;
+    }
+    .task .id .open { margin-left: auto; font-size: 11px; color: var(--muted); text-decoration: none; }
+    .task .id .open:hover { color: var(--accent); text-decoration: underline; }
     .task .status { font-size: 12px; color: var(--muted); }
     .task .status.suspended { color: var(--warn); }
     .task .status.completed { color: var(--ok); }
@@ -86,6 +91,8 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
     #intervene.show { display: block; }
     #intervene h3 { margin: 0 0 8px; font-size: 14px; color: var(--warn); }
     #intervene .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    #intervene .msg { margin-top: 8px; font-size: 12px; color: var(--muted); min-height: 16px; }
+    #intervene .msg.bad { color: var(--bad); }
     button, textarea {
       font: inherit; border-radius: 6px; border: 1px solid var(--line); background: #0f1419; color: var(--text);
     }
@@ -113,15 +120,17 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
       <h2>Live events <span id="filterLabel" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
       <div id="log"><div class="empty">等待事件…创建任务后这里会滚动输出。</div></div>
       <div id="intervene">
-        <h3>需要人工介入</h3>
+        <h3 id="interveneTitle">需要人工介入</h3>
         <div id="interveneSummary"></div>
         <textarea id="rejectMsg" placeholder="reject 意见（可选）"></textarea>
         <div class="actions">
           <button class="primary" id="btnApprove">Approve</button>
           <button class="warn" id="btnReject">Reject</button>
+          <button id="btnResume">Resume</button>
           <button id="btnInject">Inject instruction</button>
           <button class="danger" id="btnAbort">Abort</button>
         </div>
+        <div id="interveneMsg" class="msg"></div>
       </div>
     </section>
   </main>
@@ -133,6 +142,7 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
 
     let filterTaskId = null;
     let pending = null; // { taskId, requestId, ... }
+    let replaying = false;
 
     async function apiJson(path, opts = {}) {
       let url = path;
@@ -230,6 +240,9 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
       log.appendChild(div);
       log.scrollTop = log.scrollHeight;
 
+      // During replay these are history, not something awaiting an answer.
+      if (replaying) return;
+
       if (e.type === "intervention.required") {
         pending = { taskId: e.taskId, ...e.payload };
         showIntervene();
@@ -241,6 +254,12 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
       if (e.type.startsWith("task.") || e.type === "node.started" || e.type === "intervention.required") {
         void refreshTasks();
       }
+    }
+
+    function taskViewUrl(id) {
+      let url = "/tasks/" + encodeURIComponent(id) + "/view";
+      if (TOKEN) url += "?token=" + encodeURIComponent(TOKEN);
+      return url;
     }
 
     function escapeHtml(s) {
@@ -255,9 +274,11 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
     function showIntervene() {
       const box = document.getElementById("intervene");
       box.classList.add("show");
+      document.getElementById("interveneTitle").textContent =
+        "需要人工介入 · " + (pending.taskId || "");
       document.getElementById("interveneSummary").textContent =
         (pending.kind || "") + " @ " + (pending.nodeId || "") + " — " + (pending.summary || "") +
-        "\\nrequestId=" + (pending.requestId || "") + " task=" + (pending.taskId || "");
+        "\\nrequestId=" + (pending.requestId || "");
     }
     function hideIntervene() {
       document.getElementById("intervene").classList.remove("show");
@@ -277,14 +298,18 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
           const el = document.createElement("div");
           el.className = "task" + (filterTaskId === t.id ? " active" : "");
           el.innerHTML =
-            '<div class="id">' + t.id + '</div>' +
+            '<div class="id">' + t.id +
+              '<a class="open" href="' + taskViewUrl(t.id) + '" target="_blank">详情 ↗</a></div>' +
             '<div class="status ' + t.status + '">' + t.status +
               (t.current_node ? " · " + t.current_node : "") + "</div>" +
             '<div class="req">' + escapeHtml(t.requirement || "") + "</div>";
+          el.querySelector(".open").onclick = (ev) => ev.stopPropagation();
           el.onclick = () => {
             const next = filterTaskId === t.id ? null : t.id;
             filterTaskId = next;
             document.getElementById("filterLabel").textContent = filterTaskId ? ("· " + filterTaskId) : "";
+            pending = null;
+            hideIntervene();
             void refreshTasks();
             if (next) {
               void loadPending(next);
@@ -293,9 +318,17 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
           };
           root.appendChild(el);
         }
-        // auto-surface first suspended intervention
-        const sus = tasks.find((t) => t.status === "suspended");
-        if (sus) void loadPending(sus.id);
+        // Only auto-surface while nothing is selected — otherwise the panel would
+        // show another task's request over the one being inspected.
+        if (!filterTaskId) {
+          const sus = tasks.find((t) => t.status === "suspended");
+          if (sus) {
+            void loadPending(sus.id);
+          } else if (pending) {
+            pending = null;
+            hideIntervene();
+          }
+        }
       } catch (err) {
         document.getElementById("tasks").innerHTML = '<div class="empty">加载失败: ' + escapeHtml(err.message) + "</div>";
       }
@@ -307,6 +340,9 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
         if (snap.pendingIntervention) {
           pending = { taskId, ...snap.pendingIntervention };
           showIntervene();
+        } else if (!pending || pending.taskId === taskId) {
+          pending = null;
+          hideIntervene();
         }
       } catch { /* ignore */ }
     }
@@ -319,8 +355,13 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
         stream = null;
         const prev = filterTaskId;
         filterTaskId = null; // allow append during replay
-        for (const e of (data.events || [])) appendEvent(e);
-        filterTaskId = prev;
+        replaying = true;
+        try {
+          for (const e of (data.events || [])) appendEvent(e);
+        } finally {
+          replaying = false;
+          filterTaskId = prev;
+        }
         if (!log.children.length) {
           log.innerHTML = '<div class="empty">该任务暂无事件记录</div>';
         }
@@ -330,36 +371,61 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
       }
     }
 
-    document.getElementById("btnApprove").onclick = async () => {
+    /** Without this the buttons fail silently and look dead. */
+    async function runAction(label, fn) {
+      const box = document.getElementById("interveneMsg");
+      box.className = "msg";
+      box.textContent = label + "…";
+      try {
+        await fn();
+        box.textContent = label + " 已提交";
+        void refreshTasks();
+      } catch (err) {
+        box.className = "msg bad";
+        box.textContent = label + " 失败: " + err.message;
+      }
+    }
+
+    document.getElementById("btnApprove").onclick = () => {
       if (!pending) return;
-      await apiJson("/tasks/" + pending.taskId + "/interventions/" + pending.requestId, {
-        method: "POST", body: JSON.stringify({ action: "approve" }),
-      });
+      void runAction("Approve", () =>
+        apiJson("/tasks/" + pending.taskId + "/interventions/" + pending.requestId, {
+          method: "POST", body: JSON.stringify({ action: "approve" }),
+        }));
     };
-    document.getElementById("btnReject").onclick = async () => {
+    document.getElementById("btnReject").onclick = () => {
       if (!pending) return;
       const msg = document.getElementById("rejectMsg").value || "Rejected";
-      await apiJson("/tasks/" + pending.taskId + "/interventions/" + pending.requestId, {
-        method: "POST",
-        body: JSON.stringify({
-          action: "reject",
-          comments: [{ id: "ui-reject", severity: "major", comment: msg, status: "open" }],
-        }),
-      });
+      void runAction("Reject", () =>
+        apiJson("/tasks/" + pending.taskId + "/interventions/" + pending.requestId, {
+          method: "POST",
+          body: JSON.stringify({
+            action: "reject",
+            comments: [{ id: "ui-reject", severity: "major", comment: msg, status: "open" }],
+          }),
+        }));
     };
-    document.getElementById("btnInject").onclick = async () => {
+    document.getElementById("btnResume").onclick = () => {
+      const taskId = (pending && pending.taskId) || filterTaskId;
+      if (!taskId) return;
+      void runAction("Resume", () =>
+        apiJson("/tasks/" + taskId + "/resume", { method: "POST", body: "{}" }));
+    };
+    document.getElementById("btnInject").onclick = () => {
       const taskId = (pending && pending.taskId) || filterTaskId;
       if (!taskId) { alert("先选一个任务"); return; }
       const text = prompt("注入指令");
       if (!text) return;
-      await apiJson("/tasks/" + taskId + "/instructions", {
-        method: "POST", body: JSON.stringify({ text }),
-      });
+      void runAction("Inject", () =>
+        apiJson("/tasks/" + taskId + "/instructions", {
+          method: "POST", body: JSON.stringify({ text }),
+        }));
     };
-    document.getElementById("btnAbort").onclick = async () => {
+    document.getElementById("btnAbort").onclick = () => {
       const taskId = (pending && pending.taskId) || filterTaskId;
       if (!taskId) return;
-      await apiJson("/tasks/" + taskId + "/abort", { method: "POST", body: "{}" });
+      void runAction("Abort", () =>
+        apiJson("/tasks/" + taskId + "/abort", { method: "POST", body: "{}" }));
     };
 
     function connectWs() {

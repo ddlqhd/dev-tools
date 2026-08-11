@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { access, readFile, symlink, writeFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { access, readdir, readFile, stat, symlink, writeFile, unlink } from "node:fs/promises";
+import { extname, join } from "node:path";
 import type {
+  ArtifactFile,
   InterventionDecision,
   InterventionRequest,
   KernelEvent,
@@ -71,6 +72,8 @@ export interface TaskSnapshotView {
   checkpoint?: ReturnType<KernelStore["getCheckpoint"]>;
   pendingIntervention?: InterventionRequest | null;
   git?: { head: string; status: string };
+  /** Deliverables on disk under `tasks/<id>/artifacts/`. */
+  artifacts: ArtifactFile[];
 }
 
 type PendingIntervention = {
@@ -237,7 +240,8 @@ export class TaskHandle {
       return { ok: true, mode: "live" };
     }
 
-    const checkpointPending = this.readCheckpointIntervention();
+    const checkpointPending =
+      this.readCheckpointIntervention() ?? (await this.events.findUnresolvedIntervention());
     if (!checkpointPending || checkpointPending.requestId !== requestId) {
       throw new Error(`No pending intervention ${requestId} for task ${this.taskId}`);
     }
@@ -609,6 +613,10 @@ export class KernelRuntime {
         pendingIntervention = null;
       }
     }
+    if (!pendingIntervention && task.status === "suspended") {
+      const log = new EventLog(taskId, this.store.taskDir(taskId));
+      pendingIntervention = await log.findUnresolvedIntervention();
+    }
 
     let git: TaskSnapshotView["git"];
     try {
@@ -634,7 +642,37 @@ export class KernelRuntime {
       pipeline = { name: task.pipeline_name, hash: task.pipeline_hash };
     }
 
-    return { task, pipeline, checkpoint, pendingIntervention, git };
+    const artifacts = await this.listArtifacts(taskId);
+
+    return { task, pipeline, checkpoint, pendingIntervention, git, artifacts };
+  }
+
+  async listArtifacts(taskId: string): Promise<ArtifactFile[]> {
+    const dir = join(this.store.taskDir(taskId), "artifacts");
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      return [];
+    }
+    const files: ArtifactFile[] = [];
+    for (const name of names.sort()) {
+      const ext = extname(name).replace(/^\./, "");
+      if (!ext) continue;
+      try {
+        const info = await stat(join(dir, name));
+        if (!info.isFile()) continue;
+        files.push({
+          key: name.slice(0, name.length - ext.length - 1),
+          ext,
+          size: info.size,
+          mtime: info.mtime.toISOString(),
+        });
+      } catch {
+        // disappeared mid-listing
+      }
+    }
+    return files;
   }
 }
 

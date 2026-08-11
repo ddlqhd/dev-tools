@@ -6,6 +6,8 @@ import type { InterventionDecision, KernelEvent } from "@devtools/shared";
 import { KernelRuntime } from "../runtime/kernel-runtime.js";
 import { ensureCodeloopDir } from "../config.js";
 import { renderConsoleHtml } from "./console-html.js";
+import { renderTaskHtml } from "./task-html.js";
+import { buildTaskDetail } from "./task-detail.js";
 
 const MAX_JSON_BODY_BYTES = 1_000_000;
 
@@ -79,9 +81,12 @@ export async function startKernelServer(opts: ServeOptions): Promise<ServeHandle
     url: `http://${host}:${port}`,
     port,
     async close() {
+      for (const client of wss.clients) client.terminate();
       await new Promise<void>((resolve) => {
         wss.close(() => resolve());
       });
+      // Idle keep-alive sockets (console tabs) otherwise hold close() open forever.
+      server.closeAllConnections();
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
@@ -213,6 +218,27 @@ async function handleHttp(
     if (taskMatch && method === "GET") {
       const snap = await runtime.getSnapshot(taskMatch[1]!);
       json(res, 200, snap);
+      return;
+    }
+
+    const detailMatch = /^\/tasks\/([^/]+)\/detail$/.exec(path);
+    if (detailMatch && method === "GET") {
+      const taskId = detailMatch[1]!;
+      const snap = await runtime.getSnapshot(taskId);
+      const handle = await runtime.attachTask(taskId);
+      const events = await handle.events.readAfter(0);
+      json(res, 200, buildTaskDetail(snap, events));
+      return;
+    }
+
+    const viewMatch = /^\/tasks\/([^/]+)\/view$/.exec(path);
+    if (viewMatch && method === "GET") {
+      const html = renderTaskHtml({ token, taskId: viewMatch[1]! });
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      res.end(html);
       return;
     }
 

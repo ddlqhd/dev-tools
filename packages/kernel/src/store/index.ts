@@ -1,7 +1,7 @@
 import { mkdir, appendFile, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { KernelEvent, KernelEventType } from "@devtools/shared";
+import type { InterventionRequest, KernelEvent, KernelEventType } from "@devtools/shared";
 
 export type TaskStatus =
   | "created"
@@ -284,6 +284,27 @@ export class EventLog {
     for (const listener of this.listeners) listener(event as KernelEvent);
     await write;
     return event;
+  }
+
+  /**
+   * Last `intervention.required` with no matching `intervention.resolved`.
+   * Recovers requests raised by a daemon that died before persisting them.
+   */
+  async findUnresolvedIntervention(): Promise<InterventionRequest | null> {
+    const events = await this.readAfter(0);
+    const open = new Map<string, InterventionRequest>();
+    for (const event of events) {
+      if (event.type === "intervention.required") {
+        const req = event.payload as InterventionRequest;
+        if (req?.requestId) open.set(req.requestId, req);
+      } else if (event.type === "intervention.resolved") {
+        const { requestId } = event.payload as { requestId?: string };
+        if (requestId) open.delete(requestId);
+      }
+    }
+    let last: InterventionRequest | null = null;
+    for (const req of open.values()) last = req;
+    return last;
   }
 
   async readAfter(afterSeq: number): Promise<KernelEvent[]> {

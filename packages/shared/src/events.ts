@@ -46,6 +46,9 @@ export interface TaskCreatedPayload {
 export interface NodeStartedPayload {
   nodeId: string;
   primitive: string;
+  /** Engine alias from the pipeline node, absent for engine-less primitives. */
+  engine?: string;
+  model?: string;
   loopStack: LoopStackEntry[];
 }
 
@@ -53,6 +56,25 @@ export interface NodeCompletedPayload {
   nodeId: string;
   outcome: Record<string, unknown>;
   artifactIds: string[];
+}
+
+export interface NodeRetryingPayload {
+  nodeId: string;
+  attempt: number;
+  error: string;
+}
+
+export interface ArtifactCreatedPayload {
+  artifactId: string;
+  key: string;
+  kind: string;
+  path: string;
+}
+
+export interface GitCommitPayload {
+  sha: string;
+  message: string;
+  author?: string;
 }
 
 export interface EngineChunkPayload {

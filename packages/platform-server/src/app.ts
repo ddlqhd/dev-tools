@@ -199,6 +199,23 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
     },
   );
 
+  app.get<{ Params: { id: string } }>("/api/tasks/:id/detail", async (req, reply) => {
+    const task = store.getTask(req.params.id);
+    if (!task) return reply.code(404).send({ error: "not found" });
+    if (!task.instance_id || !task.kernel_task_id) {
+      return reply.code(404).send({ error: "task not bound to kernel" });
+    }
+    const inst = store.getInstance(task.instance_id);
+    if (!inst) return reply.code(404).send({ error: "instance gone" });
+    try {
+      return { detail: await new KernelClient(inst.endpoint, inst.token).detail(task.kernel_task_id) };
+    } catch (err) {
+      return reply
+        .code(502)
+        .send({ error: err instanceof Error ? err.message : "kernel unreachable" });
+    }
+  });
+
   app.get<{ Params: { id: string; artifactId: string } }>(
     "/api/tasks/:id/artifacts/:artifactId",
     async (req, reply) => {

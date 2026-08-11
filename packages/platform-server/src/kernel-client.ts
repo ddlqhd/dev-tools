@@ -1,4 +1,4 @@
-import type { InterventionDecision, KernelEvent } from "@devtools/shared";
+import type { InterventionDecision, KernelEvent, TaskDetail } from "@devtools/shared";
 
 export class KernelClient {
   constructor(
@@ -41,6 +41,14 @@ export class KernelClient {
     const res = await fetch(`${this.endpoint}/tasks/${taskId}`, { headers: this.headers() });
     if (!res.ok) throw new Error(`kernel getTask: ${res.status}`);
     return res.json();
+  }
+
+  async detail(taskId: string): Promise<TaskDetail> {
+    const res = await fetch(`${this.endpoint}/tasks/${taskId}/detail`, {
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(`kernel detail: ${res.status}`);
+    return (await res.json()) as TaskDetail;
   }
 
   async pause(taskId: string): Promise<void> {
