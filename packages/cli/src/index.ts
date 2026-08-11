@@ -171,6 +171,7 @@ program
       process.off("SIGINT", onSig);
       process.off("SIGTERM", onSig);
 
+      endStream();
       console.log("---");
       console.log(`task: ${result.taskId}`);
       console.log(`status: ${result.status}`);
@@ -391,6 +392,7 @@ async function resolveDecision(
 }
 
 async function promptIntervention(req: InterventionRequest): Promise<InterventionDecision> {
+  endStream();
   console.log("");
   console.log(`── Intervention required (${req.kind}) @ ${req.nodeId}`);
   console.log(`   ${req.summary}`);
@@ -451,8 +453,45 @@ async function apiPost(
   return res.json();
 }
 
+const DIM = "\u001b[2m";
+const RESET = "\u001b[0m";
+const COLOR = process.stdout.isTTY === true;
+
+/** Assistant/thinking deltas stream inline, so track whether a line is open. */
+let streamKind: "text" | "thinking" | null = null;
+let streamAtLineStart = true;
+
+function endStream(): void {
+  if (!streamKind) return;
+  if (COLOR) process.stdout.write(RESET);
+  if (!streamAtLineStart) process.stdout.write("\n");
+  streamKind = null;
+  streamAtLineStart = true;
+}
+
+function writeStream(kind: "text" | "thinking", text: string): void {
+  if (!text) return;
+  if (streamKind !== kind) {
+    endStream();
+    streamKind = kind;
+    if (COLOR && kind === "thinking") process.stdout.write(DIM);
+  }
+  process.stdout.write(text);
+  streamAtLineStart = text.endsWith("\n");
+}
+
 function printEvent(event: KernelEvent): void {
   const p = event.payload as Record<string, unknown>;
+
+  if (event.type === "engine.chunk") {
+    const chunk = p.chunk as { kind: string; text?: string };
+    if (chunk.kind === "text" || chunk.kind === "thinking") {
+      writeStream(chunk.kind, chunk.text ?? "");
+      return;
+    }
+  }
+  endStream();
+
   switch (event.type) {
     case "task.created":
       console.log(`[task] created pipeline=${(p.pipeline as { name: string }).name}`);

@@ -20,6 +20,8 @@ import type { EngineChunk } from "@devtools/shared";
 export interface CursorStreamState {
   sessionId?: string;
   textParts: string[];
+  /** True once an assistant delta arrived, i.e. partial output is streaming. */
+  sawTextDelta: boolean;
   filesChanged: Set<string>;
   finalText?: string;
   isError: boolean;
@@ -50,9 +52,42 @@ function captureArtifactWrite(
   }
 }
 
+/** Arg fields, in priority order, that make a readable one-line tool summary. */
+const ARG_SUMMARY_KEYS = [
+  "path",
+  "filePath",
+  "file",
+  "command",
+  "pattern",
+  "globPattern",
+  "description",
+  "query",
+];
+
+function truncate(text: string, max = 120): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
+}
+
+function summarizeArgs(args: Record<string, unknown> | undefined): string {
+  if (!args) return "";
+  for (const key of ARG_SUMMARY_KEYS) {
+    const value = args[key];
+    if (typeof value === "string" && value.trim()) return truncate(value);
+  }
+  return "";
+}
+
+/** `grepToolCall` -> `Grep`, so unknown tools still read like the CLI's own names. */
+function prettyToolName(key: string): string {
+  const base = key.replace(/ToolCall$/, "");
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
 export function createCursorStreamState(): CursorStreamState {
   return {
     textParts: [],
+    sawTextDelta: false,
     filesChanged: new Set(),
     isError: false,
   };
@@ -137,10 +172,31 @@ export function parseCursorStreamLine(
       .map((c) => c.text!)
       .join("");
 
-    if (text && (isDelta || isCompleteMessage)) {
-      if (isDelta) state.textParts.push(text);
+    // The trailing complete message repeats the last streamed message verbatim,
+    // so only surface it when this turn produced no deltas at all.
+    if (text && isDelta) {
+      state.textParts.push(text);
+      state.sawTextDelta = true;
+      chunks.push({ kind: "text", text });
+    } else if (text && isCompleteMessage && !state.sawTextDelta) {
       chunks.push({ kind: "text", text });
     }
+    return chunks;
+  }
+
+  if (type === "thinking") {
+    if (event.subtype === "delta") {
+      const text = typeof event.text === "string" ? event.text : "";
+      if (text) chunks.push({ kind: "thinking", text });
+    } else if (event.subtype === "completed") {
+      // Block terminator: deltas carry the text, so just close the paragraph.
+      chunks.push({ kind: "thinking", text: "\n" });
+    }
+    return chunks;
+  }
+
+  if (type === "user") {
+    // Echo of the prompt we just sent — nothing to show.
     return chunks;
   }
 
@@ -169,6 +225,45 @@ export function parseCursorStreamLine(
       }
       chunks.push({ kind: "toolUse", tool: "Write", summary: path });
       chunks.push({ kind: "fileChange", path, op: "create" });
+      return chunks;
+    }
+
+    if (toolCall.editToolCall) {
+      const args = (
+        toolCall.editToolCall as {
+          args?: { path?: string; streamContent?: string; newString?: string };
+        }
+      ).args;
+      const path = args?.path ?? "?";
+      state.filesChanged.add(path);
+      const fileText = args?.streamContent ?? args?.newString;
+      if (typeof fileText === "string") {
+        captureArtifactWrite(state, path, fileText);
+      }
+      chunks.push({ kind: "toolUse", tool: "Edit", summary: path });
+      chunks.push({ kind: "fileChange", path, op: "edit" });
+      return chunks;
+    }
+
+    if (toolCall.shellToolCall) {
+      const args = (
+        toolCall.shellToolCall as { args?: { command?: string; description?: string } }
+      ).args;
+      const summary = args?.description ?? args?.command ?? "";
+      chunks.push({ kind: "toolUse", tool: "Shell", summary: truncate(summary) });
+      return chunks;
+    }
+
+    if (toolCall.grepToolCall) {
+      const args = (toolCall.grepToolCall as { args?: { pattern?: string; path?: string } }).args;
+      const summary = args?.pattern ?? args?.path ?? "";
+      chunks.push({ kind: "toolUse", tool: "Grep", summary: truncate(summary) });
+      return chunks;
+    }
+
+    if (toolCall.globToolCall) {
+      const args = (toolCall.globToolCall as { args?: { globPattern?: string } }).args;
+      chunks.push({ kind: "toolUse", tool: "Glob", summary: truncate(args?.globPattern ?? "") });
       return chunks;
     }
 
@@ -206,9 +301,9 @@ export function parseCursorStreamLine(
       return chunks;
     }
 
-    const key = Object.keys(toolCall)[0] ?? "unknown";
-    chunks.push({ kind: "toolUse", tool: key, summary: "" });
-    chunks.push({ kind: "raw", type: "tool_call", data: toolCall });
+    const key = Object.keys(toolCall).find((k) => k.endsWith("ToolCall")) ?? "unknown";
+    const args = (toolCall[key] as { args?: Record<string, unknown> } | undefined)?.args;
+    chunks.push({ kind: "toolUse", tool: prettyToolName(key), summary: summarizeArgs(args) });
     return chunks;
   }
 
@@ -220,11 +315,27 @@ export function parseCursorStreamLine(
         args?: { path?: string; fileText?: string; contents?: string };
       };
       const path = write.result?.success?.path ?? write.args?.path;
-      if (path) {
+      if (path && !state.filesChanged.has(path)) {
         state.filesChanged.add(path);
         chunks.push({ kind: "fileChange", path, op: "edit" });
       }
       const fileText = write.args?.fileText ?? write.args?.contents;
+      if (typeof fileText === "string" && path) {
+        captureArtifactWrite(state, path, fileText);
+      }
+    }
+    if (toolCall?.editToolCall) {
+      const edit = toolCall.editToolCall as {
+        result?: { success?: { path?: string } };
+        args?: { path?: string; streamContent?: string; newString?: string };
+      };
+      const path = edit.result?.success?.path ?? edit.args?.path;
+      // `started` already announced the change; avoid a second identical line.
+      if (path && !state.filesChanged.has(path)) {
+        state.filesChanged.add(path);
+        chunks.push({ kind: "fileChange", path, op: "edit" });
+      }
+      const fileText = edit.args?.streamContent ?? edit.args?.newString;
       if (typeof fileText === "string" && path) {
         captureArtifactWrite(state, path, fileText);
       }

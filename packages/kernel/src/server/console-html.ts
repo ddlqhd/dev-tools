@@ -74,6 +74,8 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
     .ev:hover { background: #152030; }
     .ev .ts { color: var(--muted); margin-right: 8px; }
     .ev .type { color: var(--accent); margin-right: 8px; }
+    .ev.thinking { color: var(--muted); }
+    .ev.thinking .type { color: var(--muted); }
     .ev.intervene { border-left-color: var(--warn); background: #2a2410; }
     .ev.node { border-left-color: #355a7a; }
     .ev.ok { border-left-color: var(--ok); }
@@ -179,8 +181,38 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
       }
     }
 
+    // Open text/thinking block that consecutive deltas append to.
+    let stream = null;
+
+    function appendStreamDelta(e, kind, text) {
+      if (!text) return;
+      const log = document.getElementById("log");
+      if (log.querySelector(".empty")) log.innerHTML = "";
+      if (!stream || stream.kind !== kind || stream.taskId !== e.taskId) {
+        const div = document.createElement("div");
+        div.className = "ev " + kind;
+        const ts = (e.ts || "").slice(11, 19);
+        div.innerHTML = '<span class="ts">' + ts + '</span>' +
+          '<span class="type">' + (kind === "thinking" ? "thinking" : "assistant") + '</span>' +
+          '<span class="taskid" style="color:#8b9bb4;margin-right:8px">' + escapeHtml(e.taskId) + '</span>' +
+          '<span class="body"></span>';
+        log.appendChild(div);
+        stream = { body: div.querySelector(".body"), kind, taskId: e.taskId };
+      }
+      stream.body.textContent += text;
+      log.scrollTop = log.scrollHeight;
+    }
+
     function appendEvent(e) {
       if (filterTaskId && e.taskId !== filterTaskId) return;
+      if (e.type === "engine.chunk") {
+        const c = (e.payload && e.payload.chunk) || {};
+        if (c.kind === "text" || c.kind === "thinking") {
+          appendStreamDelta(e, c.kind, c.text || "");
+          return;
+        }
+      }
+      stream = null;
       const line = fmtEvent(e);
       if (!line) return;
       const log = document.getElementById("log");
@@ -284,6 +316,7 @@ export function renderConsoleHtml(opts: { token?: string; repoPath: string }): s
         const data = await apiJson("/tasks/" + taskId + "/events?after=0");
         const log = document.getElementById("log");
         log.innerHTML = "";
+        stream = null;
         const prev = filterTaskId;
         filterTaskId = null; // allow append during replay
         for (const e of (data.events || [])) appendEvent(e);

@@ -2,6 +2,7 @@ export type EngineType = "cursor" | "claude-code" | "codex";
 
 export type EngineChunk =
   | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
   | { kind: "toolUse"; tool: string; summary: string }
   | { kind: "fileChange"; path: string; op: "create" | "edit" | "delete" }
   | { kind: "raw"; type: string; data: unknown };

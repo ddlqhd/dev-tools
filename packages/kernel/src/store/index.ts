@@ -235,6 +235,8 @@ export class EventLog {
   private seq = 0;
   private readonly path: string;
   private readonly listeners = new Set<(e: KernelEvent) => void>();
+  /** Serializes appends: engine chunk callbacks emit without awaiting. */
+  private writeChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly taskId: string,
@@ -274,8 +276,13 @@ export class EventLog {
       type,
       payload,
     };
-    await appendFile(this.path, `${JSON.stringify(event)}\n`, "utf8");
+    const line = `${JSON.stringify(event)}\n`;
+    const write = this.writeChain.then(() => appendFile(this.path, line, "utf8"));
+    // Keep the chain alive on failure so one bad write cannot stall later events.
+    this.writeChain = write.catch(() => {});
+
     for (const listener of this.listeners) listener(event as KernelEvent);
+    await write;
     return event;
   }
 
