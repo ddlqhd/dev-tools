@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const NodeSpecSchema = z.object({
-  type: z.enum(["agent", "review", "gate", "command", "commit"]),
+  type: z.enum(["agent", "review", "gate", "command", "verify", "commit"]),
   engine: z.string().optional(),
   /** Per-node model override; wins over engines[alias].model when set. */
   model: z.string().optional(),
@@ -22,6 +22,20 @@ export const NodeSpecSchema = z.object({
 });
 
 export type NodeSpec = z.infer<typeof NodeSpecSchema>;
+
+/** Node types that run purely on orchestrator logic, with no engine session. */
+const NON_ENGINE_TYPES = new Set<string>(["command", "gate"]);
+
+const DEFAULT_ENGINE_ALIAS: Record<string, string> = {
+  verify: "verifier",
+  commit: "committer",
+};
+
+/** Engine alias a node runs on, or undefined when it needs no engine. */
+export function resolveNodeEngineKey(spec: NodeSpec): string | undefined {
+  if (NON_ENGINE_TYPES.has(spec.type)) return undefined;
+  return spec.engine ?? DEFAULT_ENGINE_ALIAS[spec.type] ?? "coder";
+}
 
 export const LoopBlockSchema = z.object({
   loop: z.object({

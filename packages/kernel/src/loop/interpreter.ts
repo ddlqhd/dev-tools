@@ -1,10 +1,11 @@
-import type {
-  FlowStep,
-  InterventionDecision,
-  InterventionRequest,
-  LoopStackEntry,
-  NodeSpec,
-  ReviewComment,
+import {
+  resolveNodeEngineKey,
+  type FlowStep,
+  type InterventionDecision,
+  type InterventionRequest,
+  type LoopStackEntry,
+  type NodeSpec,
+  type ReviewComment,
 } from "@devtools/shared";
 import { SuspendedError, type EngineAdapter, type EngineSession } from "../engines/adapter.js";
 import { getEngineAdapter, resolveEngineType } from "../engines/registry.js";
@@ -16,6 +17,7 @@ import { AgentNodeRunner } from "./runners/agent.js";
 import { ReviewNodeRunner } from "./runners/review.js";
 import { GateNodeRunner } from "./runners/gate.js";
 import { CommandNodeRunner } from "./runners/command.js";
+import { VerifyNodeRunner } from "./runners/verify.js";
 import { CommitNodeRunner } from "./runners/commit.js";
 import type { LoadedPipeline } from "../pipeline/load.js";
 
@@ -24,8 +26,10 @@ const runners: Record<string, NodeRunner> = {
   review: new ReviewNodeRunner(),
   gate: new GateNodeRunner(),
   command: new CommandNodeRunner(),
+  verify: new VerifyNodeRunner(),
   commit: new CommitNodeRunner(),
 };
+
 
 export type AbortIntent = "none" | "pause" | "abort";
 
@@ -157,13 +161,13 @@ export class PipelineInterpreter {
 
       const result = await this.runNode(step.nodeId, i);
 
-      const commandFailed =
+      const checkFailed =
         result.outcome.passed === false && Array.isArray(result.outcome.failures);
 
       const onFail =
         step.onFail ?? this.opts.pipeline.nodes[step.nodeId]?.onFail ?? undefined;
 
-      if (commandFailed && onFail) {
+      if (checkFailed && onFail) {
         const targetIndex = flow.findIndex(
           (s) => s.kind === "loop" && s.id === onFail.goto,
         );
@@ -178,13 +182,17 @@ export class PipelineInterpreter {
           const reviewOut =
             (this.opts.pipeline.nodes[reviewNodeId]?.outputs ?? ["reviewComments"])[0] ??
             "reviewComments";
+          const summary =
+            typeof result.outcome.summary === "string"
+              ? result.outcome.summary
+              : `${step.nodeId} failed`;
           await this.opts.artifacts.writeJson(reviewOut, {
             passed: false,
-            summary: "verify failed",
+            summary,
             comments: failures.map((f, idx) => ({
-              id: `verify-${idx}`,
+              id: `${step.nodeId}-${idx}`,
               severity: onFail.asComment,
-              comment: JSON.stringify(f),
+              comment: describeFailure(f),
               status: "open",
             })),
           });
@@ -194,7 +202,7 @@ export class PipelineInterpreter {
         continue;
       }
 
-      if (commandFailed) {
+      if (checkFailed) {
         const failures = result.outcome.failures as unknown[];
         throw new Error(
           `Node ${step.nodeId} failed with no onFail handler: ${JSON.stringify(failures)}`,
@@ -325,10 +333,7 @@ export class PipelineInterpreter {
     this.throwIfAborted();
 
     this.opts.store.updateTask(this.opts.taskId, { current_node: nodeId });
-    const engineKey =
-      spec.type === "command" || spec.type === "commit" || spec.type === "gate"
-        ? undefined
-        : (spec.engine ?? "coder");
+    const engineKey = resolveNodeEngineKey(spec);
     const engineConf = engineKey ? this.opts.config.engines[engineKey] : undefined;
     const resolvedModel = engineKey ? (spec.model ?? engineConf?.model) : undefined;
     await this.opts.events.emit("node.started", {
@@ -420,7 +425,7 @@ export class PipelineInterpreter {
       try {
         this.throwIfAborted();
 
-        if (spec.type === "agent" || spec.type === "review") {
+        if (engineKey) {
           this.engineCalls += 1;
           if (this.engineCalls > this.opts.config.budget.maxEngineCalls) {
             await this.opts.events.emit("budget.exceeded", { engineCalls: this.engineCalls });
@@ -465,10 +470,8 @@ export class PipelineInterpreter {
   }
 
   private async maybeSession(spec: NodeSpec): Promise<EngineSession | undefined> {
-    if (spec.type === "command" || spec.type === "commit" || spec.type === "gate") {
-      return undefined;
-    }
-    const engineKey = spec.engine ?? "coder";
+    const engineKey = resolveNodeEngineKey(spec);
+    if (!engineKey) return undefined;
     const engineConf = this.opts.config.engines[engineKey];
     if (!engineConf) {
       const known = Object.keys(this.opts.config.engines).join(", ") || "(none)";
@@ -480,14 +483,26 @@ export class PipelineInterpreter {
 
     const type = resolveEngineType(engineConf.type);
     const model = spec.model ?? engineConf.model;
+    // Verify and commit drive real tooling (test runners, git), which reaches
+    // outside the workspace; they also must not inherit the coder's conversation.
+    const drivesTooling = spec.type === "verify" || spec.type === "commit";
     const artifactWriteOnly =
-      spec.type === "review" ||
-      (spec.type === "agent" &&
-        (spec.promptTemplate === "plan" || (spec.outputs ?? []).includes("planDoc")));
-    const readonly = artifactWriteOnly
-      ? true
-      : (spec.readonly ?? spec.type === "review");
-    const mode = artifactWriteOnly ? "artifact" : readonly ? "ro" : "rw";
+      !drivesTooling &&
+      (spec.type === "review" ||
+        (spec.type === "agent" &&
+          (spec.promptTemplate === "plan" || (spec.outputs ?? []).includes("planDoc"))));
+    const readonly = drivesTooling
+      ? false
+      : artifactWriteOnly
+        ? true
+        : (spec.readonly ?? spec.type === "review");
+    const mode = drivesTooling
+      ? spec.type
+      : artifactWriteOnly
+        ? "artifact"
+        : readonly
+          ? "ro"
+          : "rw";
     const cacheKey = `${type}:${model ?? "-"}:${mode}`;
     const existing = this.sessions.get(cacheKey);
     if (existing) return existing;
@@ -498,12 +513,26 @@ export class PipelineInterpreter {
       model,
       readonly,
       artifactWriteOnly,
+      sandbox: drivesTooling ? "disabled" : "enabled",
       nodeTimeoutMs: this.opts.config.budget.nodeTimeoutMinutes * 60_000,
       signal: this.opts.signal,
     });
     this.sessions.set(cacheKey, session);
     return session;
   }
+}
+
+/** Render a verify/command failure as review-comment prose. */
+function describeFailure(failure: unknown): string {
+  if (failure && typeof failure === "object") {
+    const f = failure as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+    const head = [str(f.check), str(f.command)].filter(Boolean).join(" — ");
+    const detail = str(f.detail) ?? str(f.stderr);
+    const rendered = [head, detail].filter(Boolean).join("\n");
+    if (rendered) return rendered;
+  }
+  return JSON.stringify(failure);
 }
 
 function findPrecedingLoopIndex(flow: FlowStep[], fromIndex: number): number {

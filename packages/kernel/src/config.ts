@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
-import type { NodeSpec } from "@devtools/shared";
+import { resolveNodeEngineKey, type NodeSpec } from "@devtools/shared";
 
 export const CodeloopConfigSchema = z.object({
   version: z.literal(1),
@@ -21,6 +21,8 @@ export const CodeloopConfigSchema = z.object({
       coder: { type: "cursor" },
       codeReviewer: { type: "cursor" },
       fixer: { type: "cursor" },
+      verifier: { type: "cursor" },
+      committer: { type: "cursor" },
     }),
   budget: z
     .object({
@@ -46,9 +48,8 @@ export function getMissingEngineConfigs(
 ): string[] {
   const required = new Set<string>();
   for (const node of Object.values(nodes)) {
-    if (node.type === "agent" || node.type === "review") {
-      required.add(node.engine ?? "coder");
-    }
+    const engine = resolveNodeEngineKey(node);
+    if (engine) required.add(engine);
   }
   return [...required].filter((engine) => !engines[engine]);
 }
@@ -70,6 +71,12 @@ engines:
     type: cursor
     # model: <different from coder>
   fixer:
+    type: cursor
+  # Runs the project's own checks and reports; needs command execution.
+  verifier:
+    type: cursor
+  # Squashes the work into one commit and writes the message.
+  committer:
     type: cursor
 budget:
   maxEngineCalls: 60

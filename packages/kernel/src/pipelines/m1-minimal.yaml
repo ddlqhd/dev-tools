@@ -16,6 +16,7 @@ nodes:
     promptTemplate: code
   commit:
     type: commit
+    engine: committer
     messageStyle: conventional
 
 flow:

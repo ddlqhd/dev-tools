@@ -17,13 +17,15 @@ nodes:
     inputs: [reviewComments]
     promptTemplate: fix
   verify:
-    type: command
-    run: ["pnpm lint", "pnpm test"]
+    type: verify
+    engine: verifier
+    outputs: [verifyReport]
     onFail:
       goto: reviewLoop
       asComment: blocker
   commit:
     type: commit
+    engine: committer
     messageStyle: conventional
 
 flow:

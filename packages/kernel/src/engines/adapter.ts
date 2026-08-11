@@ -27,6 +27,12 @@ export interface SessionOptions {
    * without using Cursor `--mode plan` (which forces createPlanToolCall and blocks Write).
    */
   artifactWriteOnly?: boolean;
+  /**
+   * Sandbox for write-mode turns; defaults to enabled. Verify and commit turns
+   * need it disabled: test runners write to caches outside the workspace, and a
+   * linked worktree's git metadata lives in the main repository.
+   */
+  sandbox?: "enabled" | "disabled";
   allowedTools?: string[];
   env?: Record<string, string>;
   idleTimeoutMs?: number;

@@ -2,7 +2,11 @@ import { unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { git, type GitWorktree } from "../git/worktree.js";
 
-const ORCHESTRATOR_TEMP = new Set([".codeloop-plan.md", ".codeloop-review.json"]);
+const ORCHESTRATOR_TEMP = new Set([
+  ".codeloop-plan.md",
+  ".codeloop-review.json",
+  ".codeloop-verify.json",
+]);
 
 /**
  * After an artifactWriteOnly turn, ensure the worktree only changed allowed

@@ -35,15 +35,16 @@ codeloop 的流程是**可编排**的，但刻意不开放"任意节点连边"�
 
 ### 1.3 节点原语
 
-所有环节由 5 种原语实例化，编排层只组合原语：
+所有环节由 6 种原语实例化，编排层只组合原语。除人工审批门外，**每个环节都由引擎驱动**——流水线不写死任何项目命令：
 
 | 原语 | 说明 | 默认 pipeline 中的节点 |
 |---|---|---|
 | `agent` | 一次引擎调用：可配只读/可写、prompt 模板、输入产物 | plan、code、fixReview |
 | `review` | 引擎调用 + 强制结构化意见输出（ReviewComment[]），产出 `passed` 判定 | planReview、codeReview |
 | `gate` | 人工审批门（approve / reject / edit），可配超时 | planGate |
-| `command` | 运行 shell 命令，退出码决定结果 | verify（lint/test） |
-| `commit` | 内核内置的 git 整理提交（message 由引擎生成、人可改），非引擎调用 | commit |
+| `verify` | 引擎自行判断本项目该怎么验证并执行检查，产出结构化 VerifyResult | verify |
+| `commit` | 引擎读 diff、自拟 message、把 WIP 提交压成一个 commit；内核只做不变量校验 | commit |
+| `command` | 运行写死的 shell 命令，退出码决定结果。内置 pipeline 不再使用，供自定义 pipeline 需要固定命令时选用 | — |
 
 节点间通过**命名产物**传递数据（黑板模式）：节点声明 `inputs` / `outputs` 引用 artifact key，不依赖隐式顺序。"AI 先审 + 人终审"不需要特殊实现，就是 `review` 节点后面接一个 `gate` 节点。
 
@@ -96,8 +97,8 @@ nodes:
   code:       { type: agent,  engine: coder,         inputs: [planDoc], promptTemplate: code }
   codeReview: { type: review, engine: codeReviewer,  severityGate: major, outputs: [reviewComments] }
   fixReview:  { type: agent,  engine: fixer,         inputs: [reviewComments], promptTemplate: fix }
-  verify:     { type: command, run: ["pnpm lint", "pnpm test"] }
-  commit:     { type: commit, messageStyle: conventional }
+  verify:     { type: verify, engine: verifier,   outputs: [verifyReport] }
+  commit:     { type: commit, engine: committer,  messageStyle: conventional }
 
 flow:
   - loop:
@@ -147,7 +148,7 @@ export interface NodeContext {
   task: TaskSnapshot;                    // 任务快照(需求、pipeline 快照、loop 计数器栈)
   worktree: GitWorktree;                 // 当前工作区句柄
   artifacts: ArtifactStore;              // 按 key 读写命名产物
-  engine?: EngineSession;                // 节点绑定的引擎会话(command/commit 原语无)
+  engine?: EngineSession;                // 节点绑定的引擎会话(command/gate 原语无)
   instructions: string[];                // 本节点待消费的人工注入指令
   emit(event: KernelEvent): void;
   requestIntervention(req: InterventionRequest): Promise<InterventionDecision>;
@@ -155,7 +156,7 @@ export interface NodeContext {
 }
 
 export interface NodeRunner {
-  readonly type: NodePrimitive;          // "agent" | "review" | "gate" | "command" | "commit"
+  readonly type: NodePrimitive;          // "agent" | "review" | "gate" | "verify" | "commit" | "command"
   run(spec: NodeSpec, ctx: NodeContext): Promise<NodeResult>;
 }
 
@@ -166,7 +167,7 @@ export interface NodeResult {
 ```
 
 - 流程解释器只认识结构化块与 `NodeRunner`：按 flow 顺序执行，loop 块维护计数器栈，`until` / `when` 表达式在 `outcome` 上求值；
-- 5 种原语各对应一个 `NodeRunner` 实现，扩展新原语 = 注册新 runner（如后续增加 `subpipeline` 原语复用流程片段）；
+- 每种原语各对应一个 `NodeRunner` 实现，扩展新原语 = 注册新 runner（如后续增加 `subpipeline` 原语复用流程片段）；
 - 运行时是一个百余行的结构化解释器，不引入通用 FSM 库——结构化块的执行语义足够简单，用 XState 反而要把块结构降解成扁平状态图，得不偿失。
 
 ### 2.5 codeloop 配置（`.codeloop/config.yaml`）
@@ -178,7 +179,6 @@ version: 1
 pipeline: default-codeloop       # 引用内置模板或 .codeloop/pipelines/ 下的自定义模板
 pipelineOverrides:               # 不改模板的轻量覆盖(仅允许节点参数, 不允许改 flow)
   planGate: { timeout: 4h }
-  verify:   { run: ["pnpm lint", "pnpm test -- --changed"] }
   # 也可按节点覆盖 model，优先级高于 engines[alias].model
   # plan: { model: kimi-k3-max }
 engines:
@@ -199,6 +199,12 @@ engines:
   fixer:
     type: cursor
     model: composer-2.5
+  verifier:
+    type: cursor
+    model: composer-2.5
+  committer:
+    type: cursor
+    model: composer-2.5
 budget:
   maxEngineCalls: 60
   nodeTimeoutMinutes: 30
@@ -216,8 +222,10 @@ git:
 | `coder` | `code` | 按方案编码 |
 | `codeReviewer` | `codeReview` | 检视代码（建议与 coder 不同模型） |
 | `fixer` | `fixReview` | 按评审意见修复 |
+| `verifier` | `verify` | 判断本项目该怎么验证并执行检查 |
+| `committer` | `commit` | 压成单个 commit 并自拟 message |
 
-模型解析优先级：`节点 model` > `engines[别名].model` > CLI 默认。别名在 config 中缺失时启动即报错。同一 `type`+`model`+读写模式的节点共享引擎会话，因此 `coder` 与 `fixer` 配同一模型时仍能延续上下文。
+模型解析优先级：`节点 model` > `engines[别名].model` > CLI 默认。别名在 config 中缺失时启动即报错。同一 `type`+`model`+读写模式的节点共享引擎会话，因此 `coder` 与 `fixer` 配同一模型时仍能延续上下文；`verify` / `commit` 各自独占会话，且因为要真实执行工具链（测试缓存、linked worktree 的 git 元数据都在工作区之外）而关闭 sandbox。
 
 ## 3. 人工介入机制
 
@@ -312,7 +320,7 @@ export interface EngineTurnResult {
 
 ### 4.3 结构化产出约定
 
-`review` 原语等需要结构化输出的节点，通过 prompt 约定引擎输出 JSON（写入指定文件而非 stdout，避免流式文本污染），内核用 zod schema 校验；校验失败自动追加一轮"格式修正" prompt（最多 2 次），仍失败按节点失败处理。
+`review` / `verify` 原语等需要结构化输出的节点，通过 prompt 约定引擎输出 JSON（写入指定文件而非 stdout，避免流式文本污染），内核用 zod schema 校验；校验失败自动追加一轮"格式修正" prompt（最多 2 次），仍失败按节点失败处理。
 
 ```ts
 export interface ReviewComment {
@@ -325,7 +333,20 @@ export interface ReviewComment {
   status: "open" | "fixed" | "rejected";   // 修正节点(fixReview)更新
   rejectReason?: string;
 }
+
+export interface VerifyResult {                        // .codeloop-verify.json
+  passed: boolean;
+  summary: string;
+  checksRun: string[];                                 // 引擎实际跑过的检查
+  failures: Array<{ check: string; command?: string; detail: string }>;
+}
 ```
+
+`verify` 节点跑完后工作区一律回滚到节点开始时的 HEAD，只保留报告产物：引擎为了跑检查会产生构建输出，这些副作用不应进入提交。`failures` 非空时由 `onFail` 转成 blocker 意见回灌评审环。
+
+### 4.4 commit 环节的不变量
+
+commit 由引擎执行 git 操作（读 diff、自拟 message、`reset --soft` + `commit` 压成单个提交），内核不再拼 message，只在引擎回合结束后校验三条不变量：工作区干净、`base..HEAD` 恰好一个提交、HEAD 的 tree 与压缩前逐字节一致（提交阶段不允许任何文件变化）。任一条不满足即回滚到回合前 HEAD 并带失败原因重试（最多 3 次）。
 
 ## 5. 持久化与目录布局
 

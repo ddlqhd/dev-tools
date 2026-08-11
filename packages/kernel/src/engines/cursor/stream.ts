@@ -27,6 +27,26 @@ export interface CursorStreamState {
   capturedPlanMarkdown?: string;
   /** JSON text written to `.codeloop-review.json` via Write tool. */
   capturedReviewJson?: string;
+  /** JSON text written to `.codeloop-verify.json` via Write tool. */
+  capturedVerifyJson?: string;
+}
+
+/** Record Write contents for orchestrator artifact files, whatever the path prefix. */
+function captureArtifactWrite(
+  state: CursorStreamState,
+  path: string,
+  fileText: string,
+): void {
+  const norm = path.replace(/\\/g, "/");
+  if (/(^|\/)\.codeloop-plan\.md$/.test(norm)) {
+    state.capturedPlanMarkdown = fileText;
+  }
+  if (/(^|\/)\.codeloop-review\.json$/.test(norm)) {
+    state.capturedReviewJson = fileText;
+  }
+  if (/(^|\/)\.codeloop-verify\.json$/.test(norm)) {
+    state.capturedVerifyJson = fileText;
+  }
 }
 
 export function createCursorStreamState(): CursorStreamState {
@@ -144,13 +164,7 @@ export function parseCursorStreamLine(
       state.filesChanged.add(path);
       const fileText = args?.fileText ?? args?.contents;
       if (typeof fileText === "string") {
-        const norm = path.replace(/\\/g, "/");
-        if (/(^|\/)\.codeloop-plan\.md$/.test(norm)) {
-          state.capturedPlanMarkdown = fileText;
-        }
-        if (/(^|\/)\.codeloop-review\.json$/.test(norm)) {
-          state.capturedReviewJson = fileText;
-        }
+        captureArtifactWrite(state, path, fileText);
       }
       chunks.push({ kind: "toolUse", tool: "Write", summary: path });
       chunks.push({ kind: "fileChange", path, op: "create" });
@@ -211,13 +225,7 @@ export function parseCursorStreamLine(
       }
       const fileText = write.args?.fileText ?? write.args?.contents;
       if (typeof fileText === "string" && path) {
-        const norm = path.replace(/\\/g, "/");
-        if (/(^|\/)\.codeloop-plan\.md$/.test(norm)) {
-          state.capturedPlanMarkdown = fileText;
-        }
-        if (/(^|\/)\.codeloop-review\.json$/.test(norm)) {
-          state.capturedReviewJson = fileText;
-        }
+        captureArtifactWrite(state, path, fileText);
       }
     }
     if (toolCall?.createPlanToolCall) {

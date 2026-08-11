@@ -2,6 +2,12 @@ import { spawn } from "node:child_process";
 import { mkdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+const TEMP_FILES = [
+  ".codeloop-plan.md",
+  ".codeloop-review.json",
+  ".codeloop-verify.json",
+];
+
 export interface GitWorktree {
   repoPath: string;
   worktreePath: string;
@@ -16,6 +22,11 @@ export interface GitWorktree {
   resetHard(sha: string): Promise<void>;
   diffStat(): Promise<string>;
   changedFiles(): Promise<string[]>;
+  /** Commits reachable from HEAD but not from `base`. */
+  commitCountSince(base: string): Promise<number>;
+  /** Tree object id of a ref — identical trees mean identical content. */
+  treeHash(ref: string): Promise<string>;
+  lastCommitMessage(): Promise<string>;
 }
 
 export async function createTaskWorktree(opts: {
@@ -82,6 +93,19 @@ class WorktreeHandle implements GitWorktree {
     return git(this.worktreePath, ["diff", "--stat", "HEAD"]);
   }
 
+  async commitCountSince(base: string): Promise<number> {
+    const out = await git(this.worktreePath, ["rev-list", "--count", `${base}..HEAD`]);
+    return Number.parseInt(out.trim(), 10);
+  }
+
+  async treeHash(ref: string): Promise<string> {
+    return (await git(this.worktreePath, ["rev-parse", `${ref}^{tree}`])).trim();
+  }
+
+  async lastCommitMessage(): Promise<string> {
+    return (await git(this.worktreePath, ["log", "-1", "--pretty=%B"])).trim();
+  }
+
   async addAllAndCommit(message: string, author: "engine" | "human"): Promise<string> {
     await git(this.worktreePath, ["add", "-A"]);
     const status = await this.statusPorcelain();
@@ -95,7 +119,7 @@ class WorktreeHandle implements GitWorktree {
 
   async squashToBase(message: string, author: "engine" | "human"): Promise<string> {
     // Drop orchestrator temp files before staging.
-    for (const name of [".codeloop-plan.md", ".codeloop-review.json"]) {
+    for (const name of TEMP_FILES) {
       try {
         await unlink(join(this.worktreePath, name));
       } catch {
@@ -121,7 +145,7 @@ class WorktreeHandle implements GitWorktree {
     // If anything fails after soft-reset, restore the original HEAD.
     try {
       await git(this.worktreePath, ["reset", "--soft", this.baseCommit]);
-      for (const name of [".codeloop-plan.md", ".codeloop-review.json"]) {
+      for (const name of TEMP_FILES) {
         try {
           await unlink(join(this.worktreePath, name));
         } catch {
@@ -131,17 +155,11 @@ class WorktreeHandle implements GitWorktree {
       await git(this.worktreePath, ["add", "-A"]);
       // Ensure orchestrator temp files are not part of the squash commit.
       try {
-        await git(this.worktreePath, [
-          "reset",
-          "HEAD",
-          "--",
-          ".codeloop-plan.md",
-          ".codeloop-review.json",
-        ]);
+        await git(this.worktreePath, ["reset", "HEAD", "--", ...TEMP_FILES]);
       } catch {
         // ok if paths were never staged
       }
-      for (const name of [".codeloop-plan.md", ".codeloop-review.json"]) {
+      for (const name of TEMP_FILES) {
         try {
           await unlink(join(this.worktreePath, name));
         } catch {

@@ -80,6 +80,7 @@ class CursorSession implements EngineSession {
       model: this.opts.model,
       readonly: this.opts.readonly ?? false,
       artifactWriteOnly: this.opts.artifactWriteOnly ?? false,
+      sandbox: this.opts.sandbox ?? "enabled",
       resume: this.sessionId || undefined,
     });
 
@@ -201,6 +202,7 @@ class CursorSession implements EngineSession {
           sessionId: this.sessionId || undefined,
           capturedPlanMarkdown: state.capturedPlanMarkdown,
           capturedReviewJson: state.capturedReviewJson,
+          capturedVerifyJson: state.capturedVerifyJson,
         });
       });
     });
@@ -226,6 +228,7 @@ function buildArgs(opts: {
   model?: string;
   readonly: boolean;
   artifactWriteOnly: boolean;
+  sandbox: "enabled" | "disabled";
   resume?: string;
 }): string[] {
   // Prompt as positional arg; avoid stdin complexity for M1.
@@ -243,13 +246,13 @@ function buildArgs(opts: {
     // Need Write for `.codeloop-plan.md`. Do NOT use `--mode plan` (blocks Write,
     // steers the agent into createPlanToolCall).
     args.push("--force");
-    args.push("--sandbox", "enabled");
+    args.push("--sandbox", opts.sandbox);
   } else if (opts.readonly) {
     // True read-only review / Q&A.
     args.push("--mode", "ask");
   } else {
     args.push("--force");
-    args.push("--sandbox", "enabled");
+    args.push("--sandbox", opts.sandbox);
   }
 
   if (opts.model) {

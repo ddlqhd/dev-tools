@@ -21,9 +21,17 @@ export interface EngineTurnResult {
   capturedPlanMarkdown?: string;
   /** Captured Write contents for `.codeloop-review.json`. */
   capturedReviewJson?: string;
+  /** Captured Write contents for `.codeloop-verify.json`. */
+  capturedVerifyJson?: string;
 }
 
-export type NodePrimitive = "agent" | "review" | "gate" | "command" | "commit";
+export type NodePrimitive =
+  | "agent"
+  | "review"
+  | "gate"
+  | "command"
+  | "verify"
+  | "commit";
 
 export type InterventionDecision =
   | { action: "approve" }
