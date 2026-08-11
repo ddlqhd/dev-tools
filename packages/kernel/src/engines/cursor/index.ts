@@ -79,6 +79,7 @@ class CursorSession implements EngineSession {
       cwd: this.opts.cwd,
       model: this.opts.model,
       readonly: this.opts.readonly ?? false,
+      planMode: this.opts.planMode ?? false,
       artifactWriteOnly: this.opts.artifactWriteOnly ?? false,
       sandbox: this.opts.sandbox ?? "enabled",
       resume: this.sessionId || undefined,
@@ -227,6 +228,7 @@ function buildArgs(opts: {
   cwd: string;
   model?: string;
   readonly: boolean;
+  planMode: boolean;
   artifactWriteOnly: boolean;
   sandbox: "enabled" | "disabled";
   resume?: string;
@@ -242,9 +244,11 @@ function buildArgs(opts: {
     opts.cwd,
   ];
 
-  if (opts.artifactWriteOnly) {
-    // Need Write for `.codeloop-plan.md`. Do NOT use `--mode plan` (blocks Write,
-    // steers the agent into createPlanToolCall).
+  if (opts.planMode) {
+    // Native planning mode: read-only, plan delivered via createPlanToolCall.
+    args.push("--mode", "plan");
+  } else if (opts.artifactWriteOnly) {
+    // Needs Write for `.codeloop-review.json`; the artifact guard reverts the rest.
     args.push("--force");
     args.push("--sandbox", opts.sandbox);
   } else if (opts.readonly) {

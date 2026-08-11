@@ -486,23 +486,25 @@ export class PipelineInterpreter {
     // Verify and commit drive real tooling (test runners, git), which reaches
     // outside the workspace; they also must not inherit the coder's conversation.
     const drivesTooling = spec.type === "verify" || spec.type === "commit";
-    const artifactWriteOnly =
+    // Plan turns run the engine's native read-only planning mode; the plan comes
+    // back through the stream, so they need no write access at all.
+    const planMode =
       !drivesTooling &&
-      (spec.type === "review" ||
-        (spec.type === "agent" &&
-          (spec.promptTemplate === "plan" || (spec.outputs ?? []).includes("planDoc"))));
+      spec.type === "agent" &&
+      (spec.promptTemplate === "plan" || (spec.outputs ?? []).includes("planDoc"));
+    const artifactWriteOnly = !drivesTooling && spec.type === "review";
     const readonly = drivesTooling
       ? false
-      : artifactWriteOnly
-        ? true
-        : (spec.readonly ?? spec.type === "review");
+      : planMode || artifactWriteOnly || (spec.readonly ?? false);
     const mode = drivesTooling
       ? spec.type
-      : artifactWriteOnly
-        ? "artifact"
-        : readonly
-          ? "ro"
-          : "rw";
+      : planMode
+        ? "plan"
+        : artifactWriteOnly
+          ? "artifact"
+          : readonly
+            ? "ro"
+            : "rw";
     const cacheKey = `${type}:${model ?? "-"}:${mode}`;
     const existing = this.sessions.get(cacheKey);
     if (existing) return existing;
@@ -512,6 +514,7 @@ export class PipelineInterpreter {
       cwd: this.opts.worktree.worktreePath,
       model,
       readonly,
+      planMode,
       artifactWriteOnly,
       sandbox: drivesTooling ? "disabled" : "enabled",
       nodeTimeoutMs: this.opts.config.budget.nodeTimeoutMinutes * 60_000,

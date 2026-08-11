@@ -4,7 +4,8 @@
  * CLI flags (v2026.08.04):
  *   agent -p --output-format stream-json [--stream-partial-output]
  *     --trust --workspace <cwd>
- *     [--mode plan]          # readonly
+ *     [--mode plan]          # read-only planning; plan arrives as createPlanToolCall
+ *     [--mode ask]           # read-only Q&A
  *     [--force]              # allow writes/commands in print mode
  *     [--model <model>]
  *     [--resume <chatId>]

@@ -19,12 +19,17 @@ export interface SessionOptions {
   model?: string;
   /**
    * True for review/ask turns that must not edit the project.
-   * Combined with `artifactWriteOnly` for plan turns that may only write `.codeloop-*` files.
+   * Combined with `artifactWriteOnly` for review turns that may only write `.codeloop-*` files.
    */
   readonly?: boolean;
   /**
-   * Plan turns: allow writing orchestrator artifact files (e.g. `.codeloop-plan.md`)
-   * without using Cursor `--mode plan` (which forces createPlanToolCall and blocks Write).
+   * Plan turns: run the engine's native read-only planning mode. The plan is
+   * captured from the stream (plan tool call / final message), never from disk.
+   */
+  planMode?: boolean;
+  /**
+   * Review turns: allow writing orchestrator artifact files (e.g. `.codeloop-review.json`)
+   * while the artifact guard reverts anything else the turn touched.
    */
   artifactWriteOnly?: boolean;
   /**

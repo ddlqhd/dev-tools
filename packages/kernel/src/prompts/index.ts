@@ -46,12 +46,12 @@ ${ctx.requirement}
 ${instructionsBlock(ctx.instructions)}
 
 ## Hard rules
-1. Explore the codebase with Read/Glob as needed.
-2. You MUST create/overwrite the file \`.codeloop-plan.md\` using the **Write** tool (not CreatePlan / createPlanToolCall / plan mode UI).
-3. Do NOT modify any other files. The only allowed write is \`.codeloop-plan.md\`.
-4. After writing the file, stop. Do not implement the change.
+1. You are running in read-only plan mode. Explore the codebase with Read/Glob/Grep as needed.
+2. Deliver the finished plan with the plan tool (CreatePlan). If that tool is unavailable,
+   put the complete plan Markdown in your final message instead.
+3. Do NOT implement the change and do NOT modify any file.
 
-## \`.codeloop-plan.md\` contents (Markdown)
+## Plan contents (Markdown)
 Must include these headings:
 - Goal
 - Approach (numbered steps)

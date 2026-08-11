@@ -1,8 +1,7 @@
-import { readFile, unlink } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { EngineChunk, NodeSpec } from "@devtools/shared";
 import { renderPrompt } from "../../prompts/index.js";
-import { assertOnlyAllowedWrites } from "../artifact-guard.js";
 import type { NodeContext, NodeResult, NodeRunner } from "../node.js";
 
 const PLAN_FILE = ".codeloop-plan.md";
@@ -25,16 +24,6 @@ export class AgentNodeRunner implements NodeRunner {
       instructions: ctx.instructions,
     });
 
-    if (wantsPlanDoc) {
-      try {
-        await unlink(join(ctx.worktree.worktreePath, PLAN_FILE));
-      } catch {
-        // ok
-      }
-    }
-
-    const preHead = wantsPlanDoc ? await ctx.worktree.head() : null;
-
     let result = await ctx.engine.send(prompt, (chunk: EngineChunk) => {
       void ctx.emit({ type: "engine.chunk", payload: { nodeId: currentNodeId(ctx), chunk } });
     });
@@ -51,22 +40,22 @@ export class AgentNodeRunner implements NodeRunner {
     const outputs: NodeResult["outputs"] = {};
 
     if (wantsPlanDoc) {
-      let planContent = await resolvePlanContent(ctx, result);
+      let planContent = resolvePlanContent(result);
 
-      // One correction turn if the agent skipped writing a proper plan file.
+      // One correction turn if the agent never delivered a usable plan.
       if (!planContent) {
         await ctx.emit({
           type: "log",
           payload: {
             level: "warn",
-            message: "Plan file missing or invalid; requesting rewrite of .codeloop-plan.md",
+            message: "No plan captured from this turn; asking for the plan again",
           },
         });
         const fixPrompt = [
-          `You must write a complete implementation plan using the Write tool to exactly this path: \`${PLAN_FILE}\`.`,
-          "Do NOT use CreatePlan / createPlanToolCall.",
-          "Do NOT modify any other files.",
-          "The Markdown file must include sections: Goal, Approach, Files likely to change, Risks, Test plan.",
+          "Produce the complete implementation plan now: call the plan tool (CreatePlan),",
+          "or, if it is unavailable, put the full plan Markdown in your final message.",
+          "It must include sections: Goal, Approach, Files likely to change, Risks, Test plan.",
+          "Do NOT implement the change and do NOT modify any file.",
           "",
           `Requirement:\n${ctx.task.requirement}`,
         ].join("\n");
@@ -76,21 +65,12 @@ export class AgentNodeRunner implements NodeRunner {
             payload: { nodeId: currentNodeId(ctx), chunk },
           });
         });
-        planContent = await resolvePlanContent(ctx, result);
+        planContent = resolvePlanContent(result);
       }
 
       if (!planContent) {
-        throw new Error(
-          `Plan artifact missing: agent did not write a valid ${PLAN_FILE}`,
-        );
+        throw new Error("Plan artifact missing: agent did not deliver a usable plan");
       }
-
-      await assertOnlyAllowedWrites(
-        ctx.worktree,
-        [PLAN_FILE],
-        result.filesChanged,
-        preHead!,
-      );
 
       const saved = await ctx.artifacts.writeText("planDoc", planContent);
       outputs.planDoc = { key: "planDoc", path: saved, kind: "markdown" };
@@ -98,13 +78,6 @@ export class AgentNodeRunner implements NodeRunner {
         type: "artifact.created",
         payload: { artifactId: "planDoc", key: "planDoc", path: saved, kind: "markdown" },
       });
-
-      // Keep worktree clean of orchestrator temp files for subsequent nodes.
-      try {
-        await unlink(join(ctx.worktree.worktreePath, PLAN_FILE));
-      } catch {
-        // ok
-      }
     }
 
     // Intermediate WIP commits keep checkpoints clean; final commit node will squash.
@@ -133,21 +106,14 @@ export class AgentNodeRunner implements NodeRunner {
   }
 }
 
-async function resolvePlanContent(
-  ctx: NodeContext,
-  result: { text: string; capturedPlanMarkdown?: string },
-): Promise<string | null> {
-  const planPath = join(ctx.worktree.worktreePath, PLAN_FILE);
-  try {
-    const fromFile = await readFile(planPath, "utf8");
-    if (looksLikePlan(fromFile)) return fromFile.trim();
-  } catch {
-    // missing
-  }
-
-  if (result.capturedPlanMarkdown && looksLikePlan(result.capturedPlanMarkdown)) {
-    return result.capturedPlanMarkdown.trim();
-  }
+function resolvePlanContent(result: {
+  text: string;
+  capturedPlanMarkdown?: string;
+}): string | null {
+  // The plan tool only fires when the agent deliberately submits a plan, so its
+  // content needs no structural sniffing — just enough substance to be a plan.
+  const captured = result.capturedPlanMarkdown?.trim();
+  if (captured && captured.length >= 80) return captured;
 
   // Accept final assistant text only if it already looks like a structured plan,
   // not progress chatter ("正在生成…").
