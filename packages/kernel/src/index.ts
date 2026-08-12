@@ -4,6 +4,7 @@ export { loadConfig, ensureCodeloopDir, DEFAULT_CONFIG_YAML } from "./config.js"
 export type { CodeloopConfig } from "./config.js";
 export { loadPipeline, listBuiltinPipelines, parsePipelineYaml } from "./pipeline/load.js";
 export { CursorAdapter, CURSOR_BIN } from "./engines/cursor/index.js";
+export { OpenCodeAdapter, OPENCODE_BIN } from "./engines/opencode/index.js";
 export { getEngineAdapter, resolveEngineType } from "./engines/registry.js";
 export { PipelineInterpreter } from "./loop/interpreter.js";
 export { KernelStore, EventLog, ArtifactStore } from "./store/index.js";

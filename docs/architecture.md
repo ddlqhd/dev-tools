@@ -32,6 +32,7 @@
 - Cursor CLI（`agent -p --output-format stream-json`）
 - Claude Code（`claude -p --output-format stream-json`）
 - Codex CLI（`codex exec`）
+- OpenCode CLI（`opencode run --format json`）
 
 理由：
 

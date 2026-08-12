@@ -156,7 +156,7 @@ export class EventSync {
         this.store.insertUsage({
           task_id: task.id,
           stage: String(payload.nodeId ?? "unknown"),
-          engine_type: "cursor",
+          engine_type: String(payload.engineType ?? "cursor"),
           input_tokens: usage.inputTokens ?? 0,
           output_tokens: usage.outputTokens ?? 0,
           cost_usd: usage.costUsd ?? null,

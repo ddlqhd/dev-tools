@@ -32,6 +32,7 @@ export class AgentNodeRunner implements NodeRunner {
       type: "engine.turn.completed",
       payload: {
         nodeId: currentNodeId(ctx),
+        engineType: ctx.engineType,
         usage: result.usage,
         filesChanged: result.filesChanged,
       },

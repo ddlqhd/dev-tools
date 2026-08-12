@@ -265,7 +265,7 @@ Checkpoint 内容 = 当前节点 id + 各层 loop 计数器栈 + worktree 的 HE
 ```ts
 // packages/kernel/src/engines/adapter.ts
 export interface EngineAdapter {
-  readonly type: EngineType;                 // "claude-code" | "cursor" | "codex"
+  readonly type: EngineType;                 // "claude-code" | "cursor" | "codex" | "opencode"
   probe(): Promise<EngineInfo>;              // 检查 CLI 是否安装/登录, 版本
   createSession(opts: SessionOptions): Promise<EngineSession>;
   resumeSession(sessionId: string, opts: SessionOptions): Promise<EngineSession>;
@@ -308,6 +308,7 @@ export interface EngineTurnResult {
 | Claude Code | `claude -p <prompt> --output-format stream-json --permission-mode ...` | `--resume <session-id>` |
 | Cursor CLI | `agent -p <prompt> --output-format stream-json --trust`（只读加 `--mode plan`，可写加 `--force`） | `--resume <chat-id>` |
 | Codex CLI | `codex exec <prompt> --json --sandbox workspace-write` | `codex exec resume <session-id>` |
+| OpenCode CLI | `opencode run <prompt> --format json --dir <cwd> --thinking`（plan 用 `--agent plan`，只读不带 `--auto`，可写/评审产物加 `--auto`） | `--session <session-id>` |
 
 > 各 CLI 参数随版本演进，Adapter 实现时以 `probe()` 探测到的版本对应的 `--help` 为准，参数表集中维护在各 Adapter 文件顶部。
 

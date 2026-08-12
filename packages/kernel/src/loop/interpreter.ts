@@ -355,6 +355,7 @@ export class PipelineInterpreter {
     this.opts.store.updateTask(this.opts.taskId, { current_node: nodeId });
     const engineKey = resolveNodeEngineKey(spec);
     const engineConf = engineKey ? this.opts.config.engines[engineKey] : undefined;
+    const engineType = engineConf ? resolveEngineType(engineConf.type) : undefined;
     const resolvedModel = engineKey ? (spec.model ?? engineConf?.model) : undefined;
     await this.opts.events.emit("node.started", {
       nodeId,
@@ -401,6 +402,7 @@ export class PipelineInterpreter {
       worktree: this.opts.worktree,
       artifacts: this.opts.artifacts,
       engine,
+      engineType,
       instructions,
       config: this.opts.config,
       signal: this.opts.signal,

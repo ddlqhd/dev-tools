@@ -5,6 +5,7 @@ import type { InterventionDecision, InterventionRequest, KernelEvent } from "@de
 import { getMissingEngineConfigs, loadConfig, ensureCodeloopDir } from "./config.js";
 import { KernelStore } from "./store/index.js";
 import { getEngineAdapter, resolveEngineType } from "./engines/registry.js";
+import type { EngineInfo } from "./engines/adapter.js";
 import { loadPipeline } from "./pipeline/load.js";
 import { applyPipelineOverrides, KernelRuntime } from "./runtime/kernel-runtime.js";
 
@@ -148,6 +149,23 @@ export async function doctor(repoPath?: string): Promise<{
     detail: info.details ?? (info.loggedIn ? "logged in" : "not logged in — run: agent login"),
   });
 
+  const opencodeAdapter = getEngineAdapter("opencode");
+  const opencodeInfo = await opencodeAdapter.probe();
+  checks.push({
+    name: "opencode-cli",
+    ok: Boolean(opencodeInfo.version),
+    detail: opencodeInfo.version
+      ? `${opencodeInfo.binary} ${opencodeInfo.version}`
+      : opencodeInfo.details ?? "opencode not found",
+  });
+  checks.push({
+    name: "opencode-login",
+    ok: opencodeInfo.loggedIn,
+    detail:
+      opencodeInfo.details ??
+      (opencodeInfo.loggedIn ? "logged in" : "not logged in — run: opencode providers login"),
+  });
+
   if (repoPath) {
     try {
       const config = await loadConfig(repoPath);
@@ -185,13 +203,19 @@ export async function doctor(repoPath?: string): Promise<{
           detail: err instanceof Error ? err.message : String(err),
         });
       }
+      const engineProbes: Record<string, EngineInfo> = {};
       for (const [name, conf] of Object.entries(config.engines)) {
         try {
           const engineType = resolveEngineType(conf.type);
+          const probed =
+            engineProbes[engineType] ??
+            (engineProbes[engineType] = await getEngineAdapter(engineType).probe());
           checks.push({
             name: `engine:${name}`,
-            ok: engineType === "cursor",
-            detail: conf.model ? `${engineType} model=${conf.model}` : engineType,
+            ok: Boolean(probed.version),
+            detail: conf.model
+              ? `${engineType} model=${conf.model} (${probed.binary} ${probed.version ?? "not found"})`
+              : `${engineType} (${probed.binary} ${probed.version ?? "not found"})`,
           });
         } catch (err) {
           checks.push({

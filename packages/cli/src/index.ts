@@ -34,12 +34,12 @@ const program = new Command();
 
 program
   .name("codeloop")
-  .description("Automated AI development loop (Cursor agent engine)")
+  .description("Automated AI development loop (engine adapters: cursor, opencode)")
   .version(VERSION);
 
 program
   .command("doctor")
-  .description("Check Cursor agent CLI install/login and local config")
+  .description("Check engine CLI install/login and local config")
   .option("--repo <path>", "repo path", process.cwd())
   .action(async (opts: { repo: string }) => {
     const result = await doctor(resolve(opts.repo));

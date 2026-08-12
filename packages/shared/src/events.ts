@@ -84,6 +84,7 @@ export interface EngineChunkPayload {
 
 export interface EngineTurnCompletedPayload {
   nodeId: string;
+  engineType?: string;
   usage?: EngineTurnUsage;
   filesChanged: string[];
 }

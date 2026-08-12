@@ -1,4 +1,4 @@
-export type EngineType = "cursor" | "claude-code" | "codex";
+export type EngineType = "cursor" | "claude-code" | "codex" | "opencode";
 
 export type EngineChunk =
   | { kind: "text"; text: string }

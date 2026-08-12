@@ -64,7 +64,7 @@ export function getMissingEngineConfigs(
 export const DEFAULT_CONFIG_YAML = `version: 1
 pipeline: default-codeloop
 # Stage engines: assign different models for cross-review.
-# List available model ids with: agent --list-models
+# List available model ids with: agent --list-models (cursor) or: opencode models (opencode)
 engines:
   planner:
     type: cursor
