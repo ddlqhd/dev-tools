@@ -10,13 +10,16 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22.13"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node ../../scripts/copy-assets.mjs kernel",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && tsc -p tsconfig.test.json && node --test 'dist-test/test/*.test.js'"
   },
   "dependencies": {
     "@devtools/shared": "workspace:*",

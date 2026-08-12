@@ -7,10 +7,13 @@
   "bin": {
     "codeloop-platform": "./dist/cli.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node ../../scripts/copy-assets.mjs platform-server",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && tsc -p tsconfig.test.json && node --test 'dist-test/test/*.test.js'",
     "start": "node ./dist/cli.js",
     "dev": "node --watch ./dist/cli.js"
   },

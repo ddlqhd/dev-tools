@@ -201,6 +201,11 @@ export class TaskHandle {
         `Intervention required (${req.kind}) but no handler provided: ${req.summary}`,
       );
     }
+    // A pause/abort racing the request must not leave a waiter nobody can answer:
+    // check the intent before parking so pause()/abort() can never strand the task.
+    if (this.abortIntent !== "none" || this.ac.signal.aborted) {
+      throw new Error(this.abortIntent === "pause" ? "paused" : "aborted");
+    }
     return new Promise<InterventionDecision>((resolve, reject) => {
       this.pending = { request: req, resolve, reject };
       this.runtime.noteIntervention(this.taskId, req);
@@ -300,8 +305,14 @@ export class TaskHandle {
   async pause(): Promise<void> {
     const task = this.runtime.store.getTask(this.taskId);
     if (!task) throw new Error(`Task not found: ${this.taskId}`);
-    if (task.status === "suspended") return;
-    if (task.status !== "running") {
+    // "suspended" may mean either "paused by operator" or "awaiting an
+    // intervention" (the interpreter marks it suspended before asking). The
+    // latter must still be interruptible, or pause() would silently no-op and
+    // strand the task with an unanswered waiter.
+    const awaitingIntervention =
+      this.pending !== null || this.readCheckpointIntervention() !== null;
+    if (task.status === "suspended" && !awaitingIntervention) return;
+    if (task.status !== "running" && !awaitingIntervention) {
       throw new Error(`Cannot pause task in status ${task.status}`);
     }
     this.abortIntent = "pause";

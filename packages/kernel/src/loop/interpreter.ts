@@ -434,7 +434,7 @@ export class PipelineInterpreter {
         return result;
       } catch (err) {
         if (err instanceof SuspendedError) throw err;
-        if (this.opts.getAbortIntent() === "pause" || this.opts.signal.aborted) {
+        if (this.opts.getAbortIntent() === "pause") {
           // Roll back worktree to checkpoint on pause
           try {
             await this.opts.worktree.resetHard(head);
@@ -443,6 +443,10 @@ export class PipelineInterpreter {
           }
           this.opts.store.updateTask(this.opts.taskId, { status: "suspended" });
           throw new SuspendedError("paused");
+        }
+        if (this.opts.signal.aborted) {
+          // External abort without a pause intent: surface as aborted, not suspended.
+          throw new Error("aborted");
         }
         lastError = err;
         if (attempt < 2) {
