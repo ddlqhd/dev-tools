@@ -37,7 +37,29 @@ const program = new Command();
 program
   .name("codeloop")
   .description("Automated AI development loop (engine adapters: cursor, opencode)")
-  .version(VERSION);
+  .version(VERSION)
+  .showHelpAfterError()
+  .configureHelp({ sortSubcommands: true });
+
+program.addHelpText(
+  "after",
+  `
+Examples:
+  codeloop doctor                               check engine CLI install/login and config
+  codeloop run "fix the flaky test" --no-gate   run a task unattended (auto-approve gates)
+  codeloop run -f requirements.md --pipeline quick-fix
+  codeloop watch <taskId>                       follow a running task
+  codeloop approve <taskId>                     pass a pending gate
+  codeloop reject <taskId> -m "comments"        send back for fixes
+  codeloop serve                                start the kernel daemon (console UI)
+
+Standard workflow:
+  1. codeloop doctor
+  2. codeloop run "<requirement>" --repo <path>
+  3. codeloop watch <taskId>  (at a gate: review output, then approve or reject)
+  4. codeloop show <taskId>   (final snapshot: branch, artifacts, usage)
+`,
+);
 
 program
   .command("doctor")
@@ -92,6 +114,10 @@ program
   .argument("<taskId>")
   .description("Show task details")
   .option("--repo <path>", "repo path", process.cwd())
+  .addHelpText("after", `
+Examples:
+  codeloop show <taskId>
+  codeloop show <taskId> --repo /path/to/repo`,)
   .action(async (taskId: string, opts: { repo: string }) => {
     const repo = resolve(opts.repo);
     const lock = await readKernelLock(repo);
@@ -123,6 +149,11 @@ program
   .option("--sandbox", "sandbox write-mode engine turns")
   .option("--quiet", "less event output")
   .option("--plain", "disable the interactive TUI")
+  .addHelpText("after", `
+Examples:
+  codeloop run "implement user login"
+  codeloop run -f requirements.md --pipeline quick-fix --no-gate
+  codeloop run "add endpoint tests" --repo /path/to/repo --inplace`,)
   .action(
     async (
       requirement: string | undefined,
@@ -207,6 +238,10 @@ program
   .option("--host <host>", "bind host", "127.0.0.1")
   .option("--port <port>", "bind port", "4700")
   .option("--token <token>", "optional bearer token")
+  .addHelpText("after", `
+Examples:
+  codeloop serve
+  codeloop serve --port 4701 --token secret`,)
   .action(async (opts: { repo: string; host: string; port: string; token?: string }) => {
     const repoPath = resolve(opts.repo);
     const existing = await readKernelLock(repoPath);
@@ -262,6 +297,10 @@ program
   .option("--after <seq>", "replay events after seq", "0")
   .option("--quiet", "hide engine output")
   .option("--plain", "disable the interactive TUI")
+  .addHelpText("after", `
+Examples:
+  codeloop watch <taskId>
+  codeloop watch <taskId> --after 42   resume viewing after a disconnect`,)
   .action(
     async (
       taskId: string,
@@ -346,6 +385,7 @@ for (const action of ["pause", "resume", "abort"] as const) {
 
 program
   .command("inject")
+  .description("Inject an instruction into a running task")
   .argument("<taskId>")
   .requiredOption("-m, --message <text>", "instruction text")
   .option("--repo <path>", "repo path", process.cwd())
@@ -368,6 +408,7 @@ program
 
 program
   .command("approve")
+  .description("Approve a pending gate intervention")
   .argument("<taskId>")
   .option("--repo <path>", "repo path", process.cwd())
   .option("--request <requestId>", "intervention request id (default: pending)")
@@ -377,6 +418,7 @@ program
 
 program
   .command("reject")
+  .description("Reject a pending gate intervention with comments, fixes loop continues")
   .argument("<taskId>")
   .requiredOption("-m, --message <text>", "rejection reason / comments")
   .option("--repo <path>", "repo path", process.cwd())
