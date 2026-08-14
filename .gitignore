@@ -17,6 +17,11 @@ coverage/
 .turbo/
 .cache/
 
+# Generated skill copies (run `pnpm sync-skills` to (re)create)
+.opencode/
+.claude/
+.cursor/
+
 # Logs & OS
 *.log
 npm-debug.log*

@@ -5,6 +5,7 @@
   "packageManager": "pnpm@11.20.0",
   "scripts": {
     "sync-version": "node scripts/sync-version.mjs",
+    "sync-skills": "node scripts/sync-skills.mjs",
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",

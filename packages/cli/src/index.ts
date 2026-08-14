@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { Command } from "commander";
 import {
   createAndRunTask,
@@ -12,6 +13,7 @@ import {
   startKernelServer,
   readKernelLock,
   KernelRuntime,
+  syncSkills,
 } from "@devtools/kernel";
 import type { TaskRunResult } from "@devtools/kernel";
 import type {
@@ -231,6 +233,25 @@ program
     };
     process.on("SIGINT", () => void shutdown());
     process.on("SIGTERM", () => void shutdown());
+  });
+
+program
+  .command("sync-skills")
+  .description("Install bundled skills into a repo (.opencode/.claude/.cursor)")
+  .option("--repo <path>", "repo path", process.cwd())
+  .action(async (opts: { repo: string }) => {
+    const sourceDir = findSkillsDir();
+    if (!sourceDir) {
+      console.error(
+        "Bundled skills not found (package built without the skills/ directory).",
+      );
+      process.exit(1);
+    }
+    const repo = resolve(opts.repo);
+    const results = syncSkills({ sourceDir, projectDir: repo });
+    for (const r of results) {
+      console.log(`synced ${join(repo, r.target)} (${r.skills.join(", ")})`);
+    }
   });
 
 program
@@ -879,6 +900,18 @@ async function watchRemotePlain(options: RemoteWatchOptions): Promise<TaskUiStat
 
 function isInteractiveTerminal(): boolean {
   return process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
+function findSkillsDir(): string | undefined {
+  // Installed: <pkg>/dist/cli → <pkg>/skills (../../skills).
+  // Monorepo dev: <root>/packages/cli/dist → <root>/skills (../../../skills).
+  for (const candidate of [
+    join(import.meta.dirname, "..", "..", "skills"),
+    join(import.meta.dirname, "..", "..", "..", "skills"),
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 function parseSequence(value: string): number {

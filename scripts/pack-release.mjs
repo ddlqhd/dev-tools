@@ -10,6 +10,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -93,6 +94,22 @@ mkdirSync(artifacts, { recursive: true });
 cpSync(cliDist, join(staging, "dist/cli"), { recursive: true });
 cpSync(serverDist, join(staging, "dist/platform"), { recursive: true });
 
+// Bundle skills so `codeloop sync-skills` works on installed packages
+const skillsDir = join(root, "skills");
+const skillsManifest = existsSync(skillsDir)
+  ? (() => {
+      const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(join(dir, e.name)) : e.name === "SKILL.md" ? [join(dir, e.name)] : [],
+      );
+      return walk(skillsDir);
+    })()
+  : [];
+if (skillsManifest.length === 0) {
+  console.error(`missing skills: ${skillsDir}`);
+  process.exit(1);
+}
+cpSync(skillsDir, join(staging, "skills"), { recursive: true });
+
 // Vendor @devtools/kernel
 const kernelNm = join(staging, "node_modules/@devtools/kernel");
 mkdirSync(kernelNm, { recursive: true });
@@ -149,7 +166,7 @@ writeJson(join(staging, "package.json"), {
     "codeloop-platform": "./dist/platform/cli.js",
   },
   engines: { node: ">=22.13" },
-  files: ["dist", "node_modules/@devtools"],
+  files: ["dist", "skills", "node_modules/@devtools"],
   dependencies: {
     "@devtools/kernel": version,
     "@devtools/shared": version,
@@ -191,6 +208,7 @@ const required = [
   "package/dist/cli/index.js",
   "package/dist/platform/cli.js",
   "package/dist/platform/web/index.html",
+  "package/skills/codeloop-cli/SKILL.md",
   "package/node_modules/@devtools/kernel/dist/index.js",
   "package/node_modules/@devtools/shared/dist/index.js",
 ];
