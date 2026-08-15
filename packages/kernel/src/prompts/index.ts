@@ -39,11 +39,16 @@ function instructionsBlock(instructions: string[]): string {
 }
 
 function planPrompt(ctx: PromptContext): string {
+  const prevPlan =
+    ctx.planDoc
+      ? `\n## Previous plan (revise it rather than start from scratch)\n${ctx.planDoc}`
+      : "";
   return `You are planning a software change in this repository.
 
 ## Requirement
 ${ctx.requirement}
 ${instructionsBlock(ctx.instructions)}
+${prevPlan}
 
 ## Hard rules
 1. You are running in read-only plan mode. Explore the codebase with Read/Glob/Grep as needed.

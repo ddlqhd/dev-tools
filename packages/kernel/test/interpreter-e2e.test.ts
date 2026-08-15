@@ -128,6 +128,9 @@ test("gate reject loops back into planLoop and completes after approval", { time
     const postRejectPlan = planCalls.at(-1)!.prompt;
     assert.match(postRejectPlan, /Gate rejected with comments/);
     assert.match(postRejectPlan, /plan is wrong/);
+    // the previous plan is fed back so the model can revise, not restart
+    assert.match(postRejectPlan, /## Previous plan/);
+    assert.match(postRejectPlan, /Implement the stub feature/);
   } finally {
     await cleanupRepo(repo);
     await rm(state, { force: true });
