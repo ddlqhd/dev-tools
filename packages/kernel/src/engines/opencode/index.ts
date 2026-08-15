@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import { access, readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { constants as fsConstants } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +20,9 @@ import { createOpenCodeStreamState, parseOpenCodeStreamLine } from "./stream.js"
 export const OPENCODE_BIN = process.env.CODELOOP_OPENCODE_BIN ?? "opencode";
 
 const AUTH_FILE = join(homedir(), ".local", "share", "opencode", "auth.json");
+const OPENCODE_CONFIG =
+  process.env.OPENCODE_CONFIG ??
+  join(homedir(), ".config", "opencode", "opencode.json");
 
 export class OpenCodeAdapter implements EngineAdapter {
   readonly type: EngineType = "opencode";
@@ -268,7 +272,7 @@ function buildArgs(opts: {
   }
 
   if (opts.model) {
-    args.push("-m", opts.model);
+    args.push("-m", qualifyModel(opts.model));
   }
 
   if (opts.resume) {
@@ -285,6 +289,34 @@ async function assertDir(path: string): Promise<void> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * opencode's `-m` expects `provider/model`. A bare model name (e.g. from
+ * .codeloop/config.yaml) is resolved against the user's opencode config:
+ * if it matches the config's default model, prefix it with the config's
+ * provider; otherwise leave it as-is (it may already be qualified).
+ */
+function qualifyModel(model: string): string {
+  if (model.includes("/")) return model;
+  try {
+    const raw = readFileSync(OPENCODE_CONFIG, "utf8");
+    const cfg = JSON.parse(raw) as {
+      model?: string;
+      provider?: string | Record<string, unknown>;
+    };
+    if (cfg.model && cfg.model !== model) return model;
+    const provider =
+      typeof cfg.provider === "string"
+        ? cfg.provider
+        : cfg.provider && typeof cfg.provider === "object" && !Array.isArray(cfg.provider)
+          ? (Object.keys(cfg.provider).find((k) => k !== "$schema") ?? undefined)
+          : undefined;
+    if (provider && !model.includes("/")) return `${provider}/${model}`;
+  } catch {
+    // no config / unreadable — pass through
+  }
+  return model;
 }
 
 async function readAuth(): Promise<{ loggedIn: boolean; providers: string; details?: string }> {

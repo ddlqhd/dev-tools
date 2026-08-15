@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { Markdown } from "../components/Markdown";
 import {
   api,
   connectHub,
@@ -20,6 +21,9 @@ export function TaskPage() {
   const [preview, setPreview] = useState<{ key: string; text: string } | null>(null);
   const [injectText, setInjectText] = useState("");
   const [rejectText, setRejectText] = useState("");
+  const [planDoc, setPlanDoc] = useState<string | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reloadDetail = async () => {
@@ -48,6 +52,8 @@ export function TaskPage() {
   useEffect(() => {
     setPreview(null);
     setDetail(null);
+    setPlanDoc(null);
+    setPlanError(null);
     void reloadDetail().catch((e: Error) => setError(e.message));
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -106,6 +112,25 @@ export function TaskPage() {
     const k = kernel as { pendingIntervention?: { requestId?: string } } | null;
     return k?.pendingIntervention?.requestId;
   })();
+
+  const loadPlanDoc = useCallback(async () => {
+    if (!id) return;
+    setPlanLoading(true);
+    setPlanError(null);
+    try {
+      const text = await api.artifact(id, "planDoc");
+      setPlanDoc(text.trim() ? text : null);
+    } catch (e) {
+      setPlanError(e instanceof Error ? e.message : String(e));
+      setPlanDoc(null);
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (pendingReqId) void loadPlanDoc();
+  }, [pendingReqId, loadPlanDoc]);
 
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -195,44 +220,70 @@ export function TaskPage() {
           </div>
           <div className="Box-body">
             {pendingReqId ? (
-              <div className="row" style={{ marginBottom: 12 }}>
-                <button
-                  className="btn btn-primary"
-                  type="button"
-                  onClick={() =>
-                    void act(() => api.intervene(task.id, pendingReqId, { action: "approve" }))
-                  }
-                >
-                  Approve
-                </button>
-                <input
-                  placeholder="驳回意见"
-                  value={rejectText}
-                  onChange={(e) => setRejectText(e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                <button
-                  className="btn btn-danger"
-                  type="button"
-                  onClick={() =>
-                    void act(() =>
-                      api.intervene(task.id, pendingReqId, {
-                        action: "reject",
-                        comments: [
-                          {
-                            id: "web-reject",
-                            severity: "major",
-                            comment: rejectText || "Rejected",
-                            status: "open",
-                          },
-                        ],
-                      }),
-                    )
-                  }
-                >
-                  Reject
-                </button>
-              </div>
+              <>
+                <div className="plan-panel">
+                  <div className="row" style={{ marginBottom: 8 }}>
+                    <strong style={{ flex: 1 }}>审阅计划 (planDoc)</strong>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => void loadPlanDoc()}
+                      disabled={planLoading}
+                    >
+                      {planLoading ? "加载中…" : "刷新"}
+                    </button>
+                  </div>
+                  {planLoading ? (
+                    <p className="muted">加载计划中…</p>
+                  ) : planDoc ? (
+                    <div className="plan-doc">
+                      <Markdown content={planDoc} />
+                    </div>
+                  ) : (
+                    <p className="muted">
+                      {planError ? `planDoc 读取失败: ${planError}` : "暂无 planDoc"}
+                    </p>
+                  )}
+                </div>
+                <div className="row" style={{ marginBottom: 12 }}>
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    onClick={() =>
+                      void act(() => api.intervene(task.id, pendingReqId, { action: "approve" }))
+                    }
+                  >
+                    Approve
+                  </button>
+                  <input
+                    placeholder="驳回意见"
+                    value={rejectText}
+                    onChange={(e) => setRejectText(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    className="btn btn-danger"
+                    type="button"
+                    onClick={() =>
+                      void act(() =>
+                        api.intervene(task.id, pendingReqId, {
+                          action: "reject",
+                          comments: [
+                            {
+                              id: "web-reject",
+                              severity: "major",
+                              comment: rejectText || "Rejected",
+                              status: "open",
+                            },
+                          ],
+                        }),
+                      )
+                    }
+                  >
+                    Reject
+                  </button>
+                </div>
+              </>
             ) : (
               <p className="muted">当前无待处理审批门</p>
             )}

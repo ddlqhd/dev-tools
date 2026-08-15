@@ -737,3 +737,118 @@ pre.artifact {
   white-space: pre-wrap;
   margin: 0;
 }
+
+.plan-panel {
+  margin-bottom: 12px;
+}
+
+.plan-doc {
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 4px 16px;
+}
+
+.markdown {
+  color: var(--fg-default);
+  font-size: 13px;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.markdown h1 {
+  font-size: 1.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.markdown h2 {
+  font-size: 1.25em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.markdown h3 {
+  font-size: 1.1em;
+}
+
+.markdown p {
+  margin: 0 0 12px;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0 0 12px;
+  padding-left: 1.6em;
+}
+
+.markdown li {
+  margin: 3px 0;
+}
+
+.markdown code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--canvas-subtle);
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+}
+
+.markdown pre {
+  background: var(--canvas-subtle);
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  padding: 12px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.markdown pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+
+.markdown blockquote {
+  margin: 0 0 12px;
+  padding: 0 1em;
+  color: var(--fg-muted);
+  border-left: 3px solid var(--border-default);
+}
+
+.markdown a {
+  color: var(--accent-fg);
+  text-decoration: none;
+}
+
+.markdown a:hover {
+  text-decoration: underline;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border-muted);
+  padding: 6px 12px;
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--border-muted);
+  margin: 16px 0;
+}

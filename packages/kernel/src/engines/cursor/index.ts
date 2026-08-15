@@ -259,7 +259,7 @@ function buildArgs(opts: {
     args.push("--sandbox", opts.sandbox);
   }
 
-  if (opts.model) {
+  if (opts.model && opts.model.toLowerCase() !== "auto") {
     args.push("--model", opts.model);
   }
 
