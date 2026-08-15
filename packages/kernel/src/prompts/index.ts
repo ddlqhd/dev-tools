@@ -43,26 +43,46 @@ function planPrompt(ctx: PromptContext): string {
     ctx.planDoc
       ? `\n## Previous plan (revise it rather than start from scratch)\n${ctx.planDoc}`
       : "";
-  return `You are planning a software change in this repository.
+  return `You are an expert planning a software change in this repository. Work through the phases below and finish with a decision-complete plan: a coder must be able to implement it without making any further design decisions.
 
 ## Requirement
 ${ctx.requirement}
 ${instructionsBlock(ctx.instructions)}
 ${prevPlan}
 
+## Workflow
+
+### Phase 1 — Understand & explore
+Read the requirement carefully, then ground the plan in the actual code. Explore the codebase with Read/Glob/Grep (non-mutating commands are fine) to locate the relevant modules, existing patterns, entrypoints, configuration, and test setup. Prefer discovering facts from the code over guessing. If a detail cannot be resolved by exploration, record it as an explicit assumption or an open question instead of inventing it.
+
+### Phase 2 — Design
+Decide on one concrete approach. Briefly weigh 1–2 alternatives and state why the chosen one fits the requirement and the existing conventions best. Be minimal and focused; avoid speculative or out-of-scope changes.
+
+### Phase 3 — Finalize
+Write the final plan. It must be decision-complete: no "maybe", "TBD", or unresolved design choices. Only the recommended approach goes in the plan, not the alternatives you discarded.
+
 ## Hard rules
-1. You are running in read-only plan mode. Explore the codebase with Read/Glob/Grep as needed.
-2. Deliver the finished plan with the plan tool (CreatePlan). If that tool is unavailable,
-   put the complete plan Markdown in your final message instead.
-3. Do NOT implement the change and do NOT modify any file.
+1. You are in READ-ONLY plan mode. Explore only; do NOT implement, do NOT modify or create any file, do NOT run mutating commands.
+2. Deliver the finished plan with the plan tool (CreatePlan). If that tool is unavailable, put the complete plan Markdown in your final message instead.
+3. When a previous plan is provided, revise it: keep what is sound and explicitly change what is not. Address every review comment listed in the instructions above.
 
 ## Plan contents (Markdown)
-Must include these headings:
-- Goal
-- Approach (numbered steps)
-- Files likely to change
-- Risks / open questions
-- Test plan
+Include the following headings, concise but specific:
+
+### Goal
+What the change achieves (one or two sentences) and the success criteria — how we know it is done.
+
+### Approach
+Numbered implementation steps in execution order, describing what to change and where (module/function/file level when known). Must be decision-complete.
+
+### Files likely to change
+Concrete files/directories expected to be touched, one line each. If a path is unknown, say "to locate" rather than inventing one.
+
+### Risks / open questions
+Top risks with mitigations. Prefer a stated assumption over an open question; list only genuine open questions.
+
+### Test plan
+How the change will be verified: tests to add or update and the commands to run.
 `;
 }
 
