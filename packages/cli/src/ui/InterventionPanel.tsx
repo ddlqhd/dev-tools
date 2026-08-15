@@ -11,13 +11,12 @@ export interface InterventionPanelProps {
   onSubmit: (decision: InterventionDecision) => void;
 }
 
-type Choice = "approve" | "reject" | "edit";
-type EntryMode = "choice" | "reject" | "edit";
+type Choice = "approve" | "reject";
+type EntryMode = "choice" | "reject";
 
 const choices: Array<{ value: Choice; key: string; label: string }> = [
   { value: "approve", key: "a", label: "Approve" },
   { value: "reject", key: "r", label: "Reject" },
-  { value: "edit", key: "e", label: "Edited" },
 ];
 
 export function InterventionPanel({
@@ -78,21 +77,17 @@ export function InterventionPanel({
 
   const submitText = (text: string) => {
     const cleaned = text.trim();
-    if (mode === "reject") {
-      onSubmit({
-        action: "reject",
-        comments: [
-          {
-            id: `cli-${shortId(request.requestId, 12)}`,
-            severity: "major",
-            comment: cleaned || "Rejected",
-            status: "open",
-          },
-        ],
-      });
-      return;
-    }
-    onSubmit({ action: "edit", note: cleaned || "human edited" });
+    onSubmit({
+      action: "reject",
+      comments: [
+        {
+          id: `cli-${shortId(request.requestId, 12)}`,
+          severity: "major",
+          comment: cleaned || "Rejected",
+          status: "open",
+        },
+      ],
+    });
   };
 
   return (
@@ -132,7 +127,7 @@ export function InterventionPanel({
         <Box flexDirection="column" marginTop={1}>
           <Box>
             <Text color={colors.warn} bold>
-              {mode === "reject" ? "Rejection reason" : "Edit note"}
+              Rejection reason
             </Text>
             <Text dimColor> (esc to cancel)</Text>
           </Box>
@@ -143,11 +138,7 @@ export function InterventionPanel({
               onChange={setValue}
               onSubmit={submitText}
               focus={!busy}
-              placeholder={
-                mode === "reject"
-                  ? "What should the agent change?"
-                  : "Describe the changes made in the worktree"
-              }
+              placeholder="What should the agent change?"
             />
           </Box>
         </Box>

@@ -632,7 +632,6 @@ function describeDecision(decision: InterventionDecision | undefined): string | 
   if (decision.action === "reject") {
     return decision.comments.map((c) => c.comment).join("; ") || undefined;
   }
-  if (decision.action === "edit") return decision.note || undefined;
   return undefined;
 }
 

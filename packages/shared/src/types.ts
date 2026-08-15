@@ -36,8 +36,7 @@ export type NodePrimitive =
 
 export type InterventionDecision =
   | { action: "approve" }
-  | { action: "reject"; comments: import("./review.js").ReviewComment[] }
-  | { action: "edit"; note: string };
+  | { action: "reject"; comments: import("./review.js").ReviewComment[] };
 
 export type InterventionKind = "gate" | "limit" | "error";
 

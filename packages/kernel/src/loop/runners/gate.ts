@@ -30,20 +30,6 @@ export class GateNodeRunner implements NodeRunner {
     if (decision.action === "approve") {
       return { outputs: {}, outcome: { approved: true } };
     }
-    if (decision.action === "edit") {
-      const status = await ctx.worktree.statusPorcelain();
-      if (status.trim()) {
-        const sha = await ctx.worktree.addAllAndCommit(
-          `codeloop: human edit — ${decision.note}`,
-          "human",
-        );
-        await ctx.emit({
-          type: "git.commit",
-          payload: { sha, message: decision.note, author: "human" },
-        });
-      }
-      return { outputs: {}, outcome: { approved: true, edited: true } };
-    }
 
     // reject → signal outcome for potential loop re-entry (interpreter may handle later)
     return {

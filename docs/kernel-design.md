@@ -239,10 +239,9 @@ git:
 export type InterventionDecision =
   | { action: "approve" }
   | { action: "reject"; comments: ReviewComment[] }   // 意见回灌: 重入所在(或前置)loop 块, 意见作为输入
-  | { action: "edit"; note: string };                 // 人已直接改了产物(计划文档/代码), 内核重新读取后继续
 ```
 
-`edit` 是关键设计：人可以直接在 worktree 改代码或改 `plan.md`，然后告诉内核"我改过了，继续"。内核把人工改动作为一个独立 commit 固化（author 标记为人），保证审计链完整。
+当前 gate 只支持 approve / reject 两种决定（历史上有过 `edit` 选项——人直接改 worktree 后继续——但该能力未完整实现且与只读规划/延迟恢复路径冲突，已移除）。
 
 ### 3.2 暂停 / 恢复 / 中止
 

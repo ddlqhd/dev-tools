@@ -169,7 +169,7 @@ export async function promptPlainIntervention(
     : (prompt: string) => readline.question(prompt);
   try {
     for (;;) {
-      const answer = (await question("Approve / Reject / Edit [a/r/e]? ")).trim().toLowerCase();
+      const answer = (await question("Approve / Reject [a/r]? ")).trim().toLowerCase();
       if (answer === "a" || answer === "approve" || answer === "") {
         return { action: "approve" };
       }
@@ -185,11 +185,7 @@ export async function promptPlainIntervention(
         ];
         return { action: "reject", comments };
       }
-      if (answer === "e" || answer === "edit") {
-        const note = await question("Edit note (you should have edited worktree files): ");
-        return { action: "edit", note: note || "human edited" };
-      }
-      console.log("Please answer a, r, or e.");
+      console.log("Please answer a or r.");
     }
   } finally {
     readline.off("SIGINT", interrupt);
