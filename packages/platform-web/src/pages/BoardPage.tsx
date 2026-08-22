@@ -198,7 +198,7 @@ export function BoardPage() {
                     {t.current_node && <span className="Label Label--accent">{t.current_node}</span>}
                     {t.branch && <span className="Label">{t.branch}</span>}
                   </div>
-                  {t.error && (
+                  {t.error && (t.status === "failed" || t.status === "cancelled") && (
                     <p className="board-card-error" title={t.error}>
                       {t.error}
                     </p>

@@ -92,7 +92,7 @@ export interface TaskEvent {
 
 export type KernelTaskSnapshot = {
   task?: { status?: string };
-  pendingIntervention?: { requestId?: string } | null;
+  pendingIntervention?: { requestId?: string; kind?: string; summary?: string } | null;
 };
 
 /** Mirrors the kernel's TaskDetail (@devtools/shared) over the platform proxy. */

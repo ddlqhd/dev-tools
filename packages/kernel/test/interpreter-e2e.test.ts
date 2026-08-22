@@ -182,6 +182,50 @@ test("maxIterations: never-passing review suspends with a limit intervention", {
   }
 });
 
+test("maxIterations: approving a limit intervention continues the pipeline", { timeout: 60_000 }, async () => {
+  const repo = await freshRepo();
+  const state = await makeStubState({ reviewAlwaysFail: true });
+  try {
+    const runtime = await KernelRuntime.open(repo);
+    try {
+      process.env.CODELOOP_STUB_STATE = state;
+      const handle = await runtime.createTask({
+        requirement: "implement the stub feature",
+        repoPath: repo,
+        inplace: true,
+        pipeline: "quick-fix",
+        parkInterventions: true,
+      });
+      const events: KernelEvent[] = [];
+      handle.onEvent((e) => events.push(e));
+      const runPromise = handle.start();
+
+      const reqEvent = await waitForEvent(
+        events,
+        (e) =>
+          e.type === "intervention.required" &&
+          (e.payload as InterventionRequest).kind === "limit",
+      );
+      const req = reqEvent.payload as InterventionRequest;
+      const applied = await handle.applyIntervention(req.requestId, { action: "approve" });
+      assert.equal(applied.ok, true);
+
+      const finished = await runPromise;
+      assert.equal(finished.status, "completed", finished.error);
+      assert.equal(runtime.store.getTask(handle.taskId)?.error, null);
+
+      const resolved = events.find((e) => e.type === "intervention.resolved");
+      assert.ok(resolved, "limit approve must emit intervention.resolved");
+      assert.equal((resolved!.payload as { requestId?: string }).requestId, req.requestId);
+    } finally {
+      runtime.close();
+    }
+  } finally {
+    await cleanupRepo(repo);
+    await rm(state, { force: true });
+  }
+});
+
 test("budget: exceeding maxEngineCalls fails the task", { timeout: 60_000 }, async () => {
   const repo = await freshRepo({
     configYaml: "version: 1\npipeline: m1-minimal\nbudget:\n  maxEngineCalls: 1\n",

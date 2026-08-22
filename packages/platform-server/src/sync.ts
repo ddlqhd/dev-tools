@@ -168,7 +168,11 @@ export class EventSync {
     }
 
     if (event.type === "intervention.resolved" || event.type === "task.resumed") {
-      this.store.updateTask(task.id, { status: "running" });
+      this.store.updateTask(task.id, { status: "running", error: null });
+    }
+
+    if (event.type === "task.suspended") {
+      this.store.updateTask(task.id, { status: "waiting_human" });
     }
 
     if (event.type === "task.completed") {

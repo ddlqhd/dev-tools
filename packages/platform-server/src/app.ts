@@ -322,6 +322,10 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
         created_at: new Date().toISOString(),
         decided_at: new Date().toISOString(),
       });
+      if (req.body.action === "approve" || req.body.action === "edit") {
+        store.updateTask(task.id, { status: "running", error: null });
+        hub({ type: "task.updated", payload: store.getTask(task.id) });
+      }
       return { ok: true };
     },
   );

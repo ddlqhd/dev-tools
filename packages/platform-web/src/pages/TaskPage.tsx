@@ -113,6 +113,7 @@ export function TaskPage() {
   }, [id]);
 
   const pendingReqId = kernel?.pendingIntervention?.requestId;
+  const pendingIsLimit = kernel?.pendingIntervention?.kind === "limit";
   const hasPendingIntervention = !!pendingReqId;
   const bound = !!(task?.instance_id && task?.kernel_task_id);
   const kernelStatus = kernel?.task?.status ?? null;
@@ -240,7 +241,9 @@ export function TaskPage() {
               Retry
             </button>
           </div>
-          {task.error && <p className="error">{task.error}</p>}
+          {task.error && (task.status === "failed" || task.status === "cancelled") && (
+            <p className="error">{task.error}</p>
+          )}
           {error && <p className="error">{error}</p>}
         </div>
       </div>
@@ -257,7 +260,9 @@ export function TaskPage() {
               <>
                 <div className="plan-panel">
                   <div className="row" style={{ marginBottom: 8 }}>
-                    <strong style={{ flex: 1 }}>审阅计划 (planDoc)</strong>
+                    <strong style={{ flex: 1 }}>
+                      {pendingIsLimit ? "循环已达上限" : "审阅计划 (planDoc)"}
+                    </strong>
                     <button
                       className="btn"
                       type="button"
@@ -313,6 +318,12 @@ export function TaskPage() {
                     </p>
                   )}
                 </div>
+                {pendingIsLimit && (
+                  <p className="muted" style={{ marginBottom: 8 }}>
+                    {kernel?.pendingIntervention?.summary ?? "循环已达最大次数。"} Approve
+                    将带着当前结果继续后续步骤，Reject 则保持挂起。
+                  </p>
+                )}
                 <div className="row" style={{ marginBottom: 12 }}>
                   <button
                     className="btn btn-primary"
@@ -562,7 +573,9 @@ function Overview({ detail }: { detail: TaskDetail }) {
             </div>
           ))}
         </dl>
-        {detail.error && <p className="error">{detail.error}</p>}
+        {detail.error && (detail.status === "failed" || detail.status === "aborted") && (
+          <p className="error">{detail.error}</p>
+        )}
       </div>
     </div>
   );

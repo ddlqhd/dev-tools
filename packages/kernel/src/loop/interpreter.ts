@@ -98,18 +98,19 @@ export class PipelineInterpreter {
         flowIndex: this.opts.resume.flowIndex,
       });
     }
-    store.updateTask(taskId, { status: "running" });
+    store.updateTask(taskId, { status: "running", error: null });
 
     try {
       await this.runFlow(pipeline.flow);
       await events.emit("task.completed", {
         branch: this.opts.worktree.branch,
       });
-      store.updateTask(taskId, { status: "completed", current_node: null });
+      store.updateTask(taskId, { status: "completed", current_node: null, error: null });
       return { status: "completed" };
     } catch (err) {
       if (err instanceof SuspendedError) {
         await events.emit("task.suspended", { reason: err.message });
+        store.updateTask(taskId, { status: "suspended" });
         return { status: "suspended", error: err.message };
       }
       if (this.opts.getAbortIntent() === "abort" || this.opts.signal.aborted) {
@@ -303,15 +304,21 @@ export class PipelineInterpreter {
     }
 
     const summary = `Loop ${step.id} reached maxIterations=${step.maxIterations}`;
+    let decision: InterventionDecision;
     try {
-      await this.askForIntervention({
+      decision = await this.askForIntervention({
         requestId: `limit-${step.id}`,
         nodeId: step.id,
         kind: "limit",
         summary,
       });
     } catch {
-      // No handler / rejected — remain suspended.
+      // No handler / pause / abort — remain suspended.
+      throw new SuspendedError(summary);
+    }
+    if (decision.action === "approve" || decision.action === "edit") {
+      // Human accepts the current loop result and lets the pipeline continue.
+      return;
     }
     throw new SuspendedError(summary);
   }
@@ -326,8 +333,12 @@ export class PipelineInterpreter {
     this.patchCheckpoint({ pending_intervention: JSON.stringify(req) });
     try {
       const decision = await this.opts.requestIntervention(req);
-      this.opts.store.updateTask(this.opts.taskId, { status: "running" });
+      this.opts.store.updateTask(this.opts.taskId, { status: "running", error: null });
       this.patchCheckpoint({ pending_intervention: null });
+      await this.opts.events.emit("intervention.resolved", {
+        requestId: req.requestId,
+        decision,
+      });
       return decision;
     } catch (err) {
       if (this.opts.getAbortIntent() === "pause") {

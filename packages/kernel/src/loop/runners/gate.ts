@@ -41,10 +41,6 @@ export class GateNodeRunner implements NodeRunner {
     }
 
     const auto = "auto" in decision ? decision.auto : undefined;
-    await ctx.emit({
-      type: "intervention.resolved",
-      payload: { requestId, decision },
-    });
     if (auto) {
       await ctx.emit({
         type: "log",
