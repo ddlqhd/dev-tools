@@ -90,6 +90,11 @@ export interface TaskEvent {
   payload: string;
 }
 
+export type KernelTaskSnapshot = {
+  task?: { status?: string };
+  pendingIntervention?: { requestId?: string } | null;
+};
+
 /** Mirrors the kernel's TaskDetail (@devtools/shared) over the platform proxy. */
 export interface StageExecution {
   index: number;
@@ -221,7 +226,7 @@ export const api = {
     pipeline?: string;
   }) => req<{ task: Task }>("/api/tasks", { method: "POST", body: JSON.stringify(body) }),
   getTask: (id: string) =>
-    req<{ task: Task; repo: Repo; kernel: unknown }>(`/api/tasks/${id}`),
+    req<{ task: Task; repo: Repo; kernel: KernelTaskSnapshot | null }>(`/api/tasks/${id}`),
   listEvents: (id: string, after = 0) =>
     req<{ events: TaskEvent[] }>(`/api/tasks/${id}/events?after=${after}`),
   getDetail: (id: string) => req<{ detail: TaskDetail }>(`/api/tasks/${id}/detail`),

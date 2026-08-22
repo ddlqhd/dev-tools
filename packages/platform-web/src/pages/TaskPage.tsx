@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { taskActionsEnabled } from "@devtools/shared";
 import { Markdown } from "../components/Markdown";
 import {
   api,
   connectHub,
+  type KernelTaskSnapshot,
   type Repo,
   type StageExecution,
   type Task,
@@ -15,7 +17,7 @@ export function TaskPage() {
   const { id = "" } = useParams();
   const [task, setTask] = useState<Task | null>(null);
   const [repo, setRepo] = useState<Repo | null>(null);
-  const [kernel, setKernel] = useState<unknown>(null);
+  const [kernel, setKernel] = useState<KernelTaskSnapshot | null>(null);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [preview, setPreview] = useState<{ key: string; text: string } | null>(null);
@@ -110,10 +112,18 @@ export function TaskPage() {
     };
   }, [id]);
 
-  const pendingReqId = (() => {
-    const k = kernel as { pendingIntervention?: { requestId?: string } } | null;
-    return k?.pendingIntervention?.requestId;
-  })();
+  const pendingReqId = kernel?.pendingIntervention?.requestId;
+  const hasPendingIntervention = !!pendingReqId;
+  const bound = !!(task?.instance_id && task?.kernel_task_id);
+  const kernelStatus = kernel?.task?.status ?? null;
+  const actions = task
+    ? taskActionsEnabled({
+        status: task.status,
+        bound,
+        kernelStatus,
+        hasPendingIntervention,
+      })
+    : null;
 
   const loadPlanDoc = useCallback(async () => {
     if (!id) return;
@@ -145,7 +155,7 @@ export function TaskPage() {
     }
   };
 
-  if (!task) {
+  if (!task || !actions) {
     return <p className="muted">{error ?? "加载中…"}</p>;
   }
 
@@ -189,23 +199,44 @@ export function TaskPage() {
         </div>
         <div className="Box-body">
           <div className="row">
-            <button className="btn" type="button" onClick={() => void act(() => api.pause(task.id))}>
+            <button
+              className="btn"
+              type="button"
+              disabled={!actions.pause}
+              onClick={() => void act(() => api.pause(task.id))}
+            >
               Pause
             </button>
-            <button className="btn" type="button" onClick={() => void act(() => api.resume(task.id))}>
+            <button
+              className="btn"
+              type="button"
+              disabled={!actions.resume}
+              onClick={() => void act(() => api.resume(task.id))}
+            >
               Resume
             </button>
             <button
               className="btn btn-danger"
               type="button"
+              disabled={!actions.abort}
               onClick={() => void act(() => api.abort(task.id))}
             >
               Abort
             </button>
-            <button className="btn" type="button" onClick={() => void act(() => api.cancel(task.id))}>
+            <button
+              className="btn"
+              type="button"
+              disabled={!actions.cancel}
+              onClick={() => void act(() => api.cancel(task.id))}
+            >
               Cancel
             </button>
-            <button className="btn" type="button" onClick={() => void act(() => api.retry(task.id))}>
+            <button
+              className="btn"
+              type="button"
+              disabled={!actions.retry}
+              onClick={() => void act(() => api.retry(task.id))}
+            >
               Retry
             </button>
           </div>
@@ -250,7 +281,7 @@ export function TaskPage() {
                         <button
                           className="btn btn-primary"
                           type="button"
-                          disabled={!editText.trim()}
+                          disabled={!actions.edit || !editText.trim()}
                           onClick={() =>
                             void act(async () => {
                               await api.intervene(task.id, pendingReqId, {
@@ -286,6 +317,7 @@ export function TaskPage() {
                   <button
                     className="btn btn-primary"
                     type="button"
+                    disabled={!actions.approve}
                     onClick={() =>
                       void act(() => api.intervene(task.id, pendingReqId, { action: "approve" }))
                     }
@@ -295,6 +327,7 @@ export function TaskPage() {
                   <button
                     className="btn"
                     type="button"
+                    disabled={!actions.edit}
                     onClick={() => {
                       setEditText(planDoc ?? "");
                       setEditingPlan(true);
@@ -311,6 +344,7 @@ export function TaskPage() {
                   <button
                     className="btn btn-danger"
                     type="button"
+                    disabled={!actions.reject}
                     onClick={() =>
                       void act(() =>
                         api.intervene(task.id, pendingReqId, {
@@ -344,6 +378,7 @@ export function TaskPage() {
               <button
                 className="btn"
                 type="button"
+                disabled={!actions.inject}
                 onClick={() =>
                   void act(async () => {
                     await api.inject(task.id, injectText);

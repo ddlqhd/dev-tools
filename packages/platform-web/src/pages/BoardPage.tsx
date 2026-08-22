@@ -64,7 +64,10 @@ export function BoardPage() {
       return;
     }
     let cancelled = false;
+    setPipelines([]);
+    setForm((f) => ({ ...f, pipeline: "" }));
     setPipelinesLoading(true);
+    setError(null);
     void api
       .getRepoConfig(form.repoId)
       .then((res) => {
@@ -169,6 +172,7 @@ export function BoardPage() {
           >
             入队
           </button>
+          {pipelinesLoading && <p className="muted">加载 Pipeline…</p>}
           {error && <p className="error">{error}</p>}
           {!repos.length && (
             <p className="muted">还没有仓库，先去「仓库」页接入本地或 GitHub 仓库。</p>
