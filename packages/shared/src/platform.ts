@@ -7,6 +7,7 @@ export type PlatformTaskStatus =
   | "waiting_human"
   | "delivering"
   | "done"
+  | "merged"
   | "failed"
   | "cancelled";
 
@@ -47,6 +48,7 @@ export interface ProgressReport {
   status: PlatformTaskStatus;
   currentNode?: string;
   branch?: string;
+  prNumber?: number;
   consoleUrl?: string;
   detailMarkdown?: string;
 }
@@ -75,6 +77,21 @@ export type PlatformEvent =
       command: string;
       args: string;
       user: string;
+      repo: RepoRef;
+    }
+  | {
+      kind: "pr_merged";
+      prNumber: number;
+      branch: string;
+      repo: RepoRef;
+    }
+  | {
+      kind: "ci_failed";
+      prNumber?: number;
+      branch?: string;
+      headSha?: string;
+      /** Human-readable failing check names + optional run URLs. */
+      checks: Array<{ name: string; url?: string }>;
       repo: RepoRef;
     };
 

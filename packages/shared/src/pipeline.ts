@@ -10,6 +10,10 @@ export const NodeSpecSchema = z.object({
   inputs: z.array(z.string()).optional(),
   outputs: z.array(z.string()).optional(),
   timeout: z.string().optional(),
+  /** Gate only: what to do when `timeout` elapses without a human decision. */
+  timeoutPolicy: z.enum(["approve", "reject"]).optional(),
+  /** Gate only: artifact the human may edit when deciding (defaults to planDoc). */
+  artifactKey: z.string().optional(),
   severityGate: z.enum(["blocker", "major", "minor", "nit"]).optional(),
   run: z.array(z.string()).optional(),
   messageStyle: z.string().optional(),
@@ -22,6 +26,16 @@ export const NodeSpecSchema = z.object({
 });
 
 export type NodeSpec = z.infer<typeof NodeSpecSchema>;
+
+/** Parse a human duration like "24h", "30m", "90s", "500ms" to milliseconds. */
+export function parseDurationMs(raw: string): number {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)?\s*$/i.exec(raw);
+  if (!m) throw new Error(`Invalid duration: "${raw}"`);
+  const value = Number(m[1]);
+  const unit = (m[2] ?? "ms").toLowerCase();
+  const scale = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 }[unit]!;
+  return value * scale;
+}
 
 /** Node types that run purely on orchestrator logic, with no engine session. */
 const NON_ENGINE_TYPES = new Set<string>(["command", "gate"]);

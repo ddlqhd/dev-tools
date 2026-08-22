@@ -34,6 +34,12 @@ export interface TaskRow {
   pipeline_name: string | null;
   progress_comment_id: string | null;
   error: string | null;
+  /** Times this task has been auto-requeued after failure. */
+  retry_count?: number;
+  /** Earliest time the scheduler may pick this task up again (ISO). */
+  next_retry_at?: string | null;
+  /** For derived tasks (e.g. ci-fix): the task that produced the PR. */
+  parent_task_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -96,6 +102,9 @@ export class PlatformStore {
         pipeline_name TEXT,
         progress_comment_id TEXT,
         error TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        parent_task_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -140,6 +149,25 @@ export class PlatformStore {
         ts TEXT NOT NULL
       );
     `);
+    this.migrate();
+  }
+
+  /** Additive column migrations for databases created before the fields existed. */
+  private migrate(): void {
+    const cols = new Set(
+      (this.db.prepare(`PRAGMA table_info(tasks)`).all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
+    );
+    if (!cols.has("retry_count")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!cols.has("next_retry_at")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN next_retry_at TEXT`);
+    }
+    if (!cols.has("parent_task_id")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT`);
+    }
   }
 
   close(): void {
@@ -230,8 +258,9 @@ export class PlatformStore {
         `INSERT INTO tasks (
           id, repo_id, source, issue_number, title, requirement, status, priority,
           instance_id, kernel_task_id, branch, pr_number, current_node, loop_state,
-          pipeline_name, progress_comment_id, error, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          pipeline_name, progress_comment_id, error, retry_count, next_retry_at,
+          parent_task_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         row.id,
@@ -251,6 +280,9 @@ export class PlatformStore {
         row.pipeline_name,
         row.progress_comment_id,
         row.error,
+        row.retry_count ?? 0,
+        row.next_retry_at ?? null,
+        row.parent_task_id ?? null,
         row.created_at,
         row.updated_at,
       );
@@ -272,6 +304,9 @@ export class PlatformStore {
         | "pipeline_name"
         | "progress_comment_id"
         | "error"
+        | "retry_count"
+        | "next_retry_at"
+        | "parent_task_id"
       >
     >,
   ): void {
@@ -282,7 +317,7 @@ export class PlatformStore {
       .prepare(
         `UPDATE tasks SET status=?, priority=?, instance_id=?, kernel_task_id=?, branch=?,
          pr_number=?, current_node=?, loop_state=?, pipeline_name=?, progress_comment_id=?,
-         error=?, updated_at=? WHERE id=?`,
+         error=?, retry_count=?, next_retry_at=?, parent_task_id=?, updated_at=? WHERE id=?`,
       )
       .run(
         next.status,
@@ -296,6 +331,9 @@ export class PlatformStore {
         next.pipeline_name,
         next.progress_comment_id,
         next.error,
+        next.retry_count ?? 0,
+        next.next_retry_at ?? null,
+        next.parent_task_id ?? null,
         next.updated_at,
         id,
       );
@@ -339,19 +377,65 @@ export class PlatformStore {
   }
 
   dequeueCandidates(limit: number): TaskRow[] {
+    const now = new Date().toISOString();
     return this.db
       .prepare(
         `SELECT * FROM tasks WHERE status = 'queued'
-         ORDER BY priority DESC, created_at ASC LIMIT ?`,
+         AND (next_retry_at IS NULL OR next_retry_at <= ?)
+         ORDER BY priority DESC, COALESCE(next_retry_at, created_at) ASC LIMIT ?`,
       )
-      .all(limit) as unknown as TaskRow[];
+      .all(now, limit) as unknown as TaskRow[];
+  }
+
+  getTaskByPr(repoId: string, prNumber: number): TaskRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT * FROM tasks WHERE repo_id = ? AND pr_number = ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(repoId, prNumber) as unknown as TaskRow | undefined;
+  }
+
+  /** Most recent task on a branch regardless of status (excludes ci-fix chains). */
+  getLatestTaskByBranch(repoId: string, branch: string): TaskRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT * FROM tasks WHERE repo_id = ? AND branch = ? AND source != 'ci-fix'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(repoId, branch) as unknown as TaskRow | undefined;
+  }
+
+  countCiFixTasks(parentTaskId: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM tasks
+         WHERE parent_task_id = ? AND source = 'ci-fix'
+         AND status NOT IN ('cancelled')`,
+      )
+      .get(parentTaskId) as { c: number };
+    return row.c;
+  }
+
+  /** A ci-fix already queued/running for this parent — don't stack duplicates. */
+  hasOpenCiFixTask(parentTaskId: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM tasks
+         WHERE parent_task_id = ? AND source = 'ci-fix'
+         AND status IN ('queued','preparing','running','waiting_human','delivering')`,
+      )
+      .get(parentTaskId) as { c: number };
+    return row.c > 0;
   }
 
   countActiveByRepo(repoId: string): number {
+    // `waiting_human` deliberately excluded: tasks parked on an approval must
+    // not block fresh work from being scheduled for the same repo.
     const row = this.db
       .prepare(
         `SELECT COUNT(*) AS c FROM tasks WHERE repo_id = ?
-         AND status IN ('preparing','running','waiting_human','delivering')`,
+         AND status IN ('preparing','running','delivering')`,
       )
       .get(repoId) as { c: number };
     return row.c;

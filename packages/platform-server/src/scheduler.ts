@@ -48,6 +48,11 @@ export class Scheduler {
     requirement: string;
     priority?: number;
     pipeline?: string;
+    source?: string;
+    parentTaskId?: string;
+    /** Existing branch to run on (ci-fix reuses the PR branch). */
+    branch?: string;
+    issueNumber?: number;
   }): Promise<TaskRow> {
     const repo = this.store.getRepo(opts.repoId);
     if (!repo) throw new Error(`repo not found: ${opts.repoId}`);
@@ -55,15 +60,15 @@ export class Scheduler {
     const task: TaskRow = {
       id: randomUUID().slice(0, 10),
       repo_id: repo.id,
-      source: "manual",
-      issue_number: null,
+      source: opts.source ?? "manual",
+      issue_number: opts.issueNumber ?? null,
       title: opts.title,
       requirement: opts.requirement,
       status: "queued",
       priority: opts.priority ?? 0,
       instance_id: null,
       kernel_task_id: null,
-      branch: null,
+      branch: opts.branch ?? null,
       pr_number: null,
       current_node: null,
       loop_state: null,
@@ -232,6 +237,8 @@ export class Scheduler {
         requirement: task.requirement,
         repoPath: clonePath,
         pipeline: task.pipeline_name ?? undefined,
+        // ci-fix tasks run on the PR branch they are fixing
+        branch: task.branch ?? undefined,
         configOverrides: { autoApproveGates: false },
       });
 
@@ -244,9 +251,10 @@ export class Scheduler {
       this.hub({ type: "task.updated", payload: this.store.getTask(task.id) });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const bound = this.store.getTask(task.id);
-      this.store.updateTask(task.id, { status: "failed", error: message });
+      // Auto-retry with backoff when the budget allows; terminal fail otherwise.
+      this.sync.handleTaskFailure(task.id, message);
       // Free instance even if createTask failed before binding instance_id on the task.
+      const bound = this.store.getTask(task.id);
       this.sync.releaseInstance(bound?.instance_id ?? instance?.id);
       this.hub({ type: "task.updated", payload: this.store.getTask(task.id) });
     }
@@ -275,6 +283,85 @@ export class Scheduler {
     return new GitHubAdapter(token);
   }
 
+  /** Mark the originating task merged when a delivered PR lands. */
+  private async handlePrMerged(
+    repo: RepoRow,
+    prNumber: number,
+    branch: string,
+  ): Promise<void> {
+    const task =
+      this.store.getTaskByPr(repo.id, prNumber) ??
+      (branch ? this.store.getLatestTaskByBranch(repo.id, branch) : undefined);
+    if (!task) return;
+    if (["merged", "cancelled"].includes(task.status)) return;
+
+    this.store.updateTask(task.id, { status: "merged" });
+    this.hub({ type: "task.updated", payload: this.store.getTask(task.id) });
+
+    const token = repo.github_token ?? this.config.github.token;
+    if (token && task.issue_number) {
+      try {
+        await new GitHubAdapter(token).postProgress(
+          { repo: { platform: "github", fullName: repo.full_name }, number: task.issue_number },
+          {
+            summary: `PR #${prNumber} merged — task \`${task.id}\` complete.`,
+            status: "merged",
+            prNumber,
+          },
+        );
+      } catch (err) {
+        console.error(`[pr-merged] ${task.id}:`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
+  /** CI failure on a delivered PR → enqueue a bounded fix task on the same branch. */
+  private async handleCiFailed(
+    repo: RepoRow,
+    prNumber: number | undefined,
+    branch: string | undefined,
+    checks: Array<{ name: string; url?: string }>,
+  ): Promise<void> {
+    if (!this.config.scheduler.ciFix.enabled) return;
+
+    let parent = prNumber
+      ? this.store.getTaskByPr(repo.id, prNumber)
+      : undefined;
+    parent =
+      parent ??
+      (branch ? this.store.getLatestTaskByBranch(repo.id, branch) : undefined);
+    // Never chain fixes onto fix tasks, and only fix delivered PRs — a branch
+    // still checked out by a running task cannot host a second worktree.
+    if (!parent || parent.source === "ci-fix" || parent.branch == null) return;
+    if (!["done", "merged"].includes(parent.status)) return;
+    if (this.store.hasOpenCiFixTask(parent.id)) return;
+    if (this.store.countCiFixTasks(parent.id) >= this.config.scheduler.ciFix.maxPerTask) {
+      console.error(`[ci-fix] ${parent.id}: max ci-fix attempts reached, skipping`);
+      return;
+    }
+
+    const checkLines = checks.map((c) => `- ${c.name}${c.url ? ` (${c.url})` : ""}`).join("\n");
+    const requirement = [
+      `CI is failing on branch \`${parent.branch}\` (PR #${prNumber ?? "?"}).`,
+      "",
+      "**Failing checks:**",
+      checkLines,
+      "",
+      "Fix the failures without changing unrelated behavior. The work must land on the same branch so the existing PR updates.",
+    ].join("\n");
+
+    await this.enqueueManual({
+      repoId: repo.id,
+      title: `CI fix: ${parent.title}`,
+      requirement,
+      priority: 5,
+      pipeline: "quick-fix",
+      source: "ci-fix",
+      parentTaskId: parent.id,
+      branch: parent.branch,
+    });
+  }
+
   async handleWebhook(
     headers: Record<string, string>,
     body: unknown,
@@ -297,6 +384,16 @@ export class Scheduler {
 
     if (event.kind === "issue_labeled") {
       await this.enqueueIssue(repo, event.issue);
+      return;
+    }
+
+    if (event.kind === "pr_merged") {
+      await this.handlePrMerged(repo, event.prNumber, event.branch);
+      return;
+    }
+
+    if (event.kind === "ci_failed") {
+      await this.handleCiFailed(repo, event.prNumber, event.branch, event.checks);
       return;
     }
 

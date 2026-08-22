@@ -159,6 +159,51 @@ export class GitHubAdapter implements PlatformAdapter {
       };
     }
 
+    if (event === "pull_request") {
+      const action = payload.action as string;
+      const pr = payload.pull_request as {
+        number: number;
+        merged?: boolean;
+        head?: { ref?: string; sha?: string };
+      };
+      if (action === "closed" && pr.merged) {
+        return {
+          kind: "pr_merged",
+          prNumber: pr.number,
+          branch: pr.head?.ref ?? "",
+          repo,
+        };
+      }
+      return null;
+    }
+
+    if (event === "check_suite" || event === "check_run") {
+      const run = (payload[event] ?? {}) as {
+        conclusion?: string | null;
+        head_branch?: string;
+        head_sha?: string;
+        pull_requests?: Array<{ number: number }>;
+        name?: string;
+        check_suite?: { head_branch?: string; head_sha?: string; pull_requests?: Array<{ number: number }> };
+      };
+      if (run.conclusion !== "failure" && run.conclusion !== "timed_out") return null;
+      const suite = event === "check_run" ? run.check_suite ?? {} : run;
+      const checks = [
+        {
+          name: event === "check_run" ? (run.name ?? "check") : `${event} failed`,
+          url: (payload as { check_run?: { details_url?: string } }).check_run?.details_url,
+        },
+      ];
+      return {
+        kind: "ci_failed",
+        prNumber: suite.pull_requests?.[0]?.number ?? run.pull_requests?.[0]?.number,
+        branch: suite.head_branch ?? run.head_branch,
+        headSha: suite.head_sha ?? run.head_sha,
+        checks,
+        repo,
+      };
+    }
+
     return null;
   }
 
@@ -223,6 +268,7 @@ export class GitHubAdapter implements PlatformAdapter {
       "",
       `**Status:** \`${report.status}\`${report.currentNode ? ` · node \`${report.currentNode}\`` : ""}`,
       report.branch ? `**Branch:** \`${report.branch}\`` : null,
+      report.prNumber ? `**PR:** #${report.prNumber}` : null,
       report.consoleUrl ? `**Console:** ${report.consoleUrl}` : null,
       "",
       report.summary,

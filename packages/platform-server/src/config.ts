@@ -26,8 +26,28 @@ export const PlatformConfigSchema = z.object({
       globalMaxInstances: z.number().int().positive().default(2),
       pollIntervalMs: z.number().int().positive().default(300_000),
       tickMs: z.number().int().positive().default(3_000),
+      /** Auto-requeue failed tasks up to N times with exponential backoff. */
+      retry: z
+        .object({
+          maxRetries: z.number().int().nonnegative().default(2),
+          baseDelayMs: z.number().int().positive().default(60_000),
+        })
+        .default({ maxRetries: 2, baseDelayMs: 60_000 }),
+      /** Auto-create a fix task when CI fails on a delivered PR. */
+      ciFix: z
+        .object({
+          enabled: z.boolean().default(true),
+          maxPerTask: z.number().int().positive().default(3),
+        })
+        .default({ enabled: true, maxPerTask: 3 }),
     })
-    .default({ globalMaxInstances: 2, pollIntervalMs: 300_000, tickMs: 3_000 }),
+    .default({
+      globalMaxInstances: 2,
+      pollIntervalMs: 300_000,
+      tickMs: 3_000,
+      retry: { maxRetries: 2, baseDelayMs: 60_000 },
+      ciFix: { enabled: true, maxPerTask: 3 },
+    }),
   /** argv for spawning codeloop; omit to auto-detect bundled / monorepo CLI */
   codeloopBin: z.union([z.string(), z.array(z.string())]).optional(),
   platformToken: z.string().optional(),

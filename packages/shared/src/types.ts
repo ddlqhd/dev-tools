@@ -35,8 +35,10 @@ export type NodePrimitive =
   | "commit";
 
 export type InterventionDecision =
-  | { action: "approve" }
-  | { action: "reject"; comments: import("./review.js").ReviewComment[] };
+  | { action: "approve"; auto?: boolean }
+  | { action: "reject"; comments: import("./review.js").ReviewComment[]; auto?: boolean }
+  /** Approve after replacing the gate's target artifact (e.g. an edited planDoc). */
+  | { action: "edit"; content: string; comments?: import("./review.js").ReviewComment[] };
 
 export type InterventionKind = "gate" | "limit" | "error";
 
@@ -45,4 +47,10 @@ export interface InterventionRequest {
   nodeId: string;
   kind: InterventionKind;
   summary: string;
+  /** Artifact the decision may edit in place (gate with outputs, e.g. planDoc). */
+  artifactKey?: string;
+  /** Auto-resolve the intervention after this long (parsed from node spec.timeout). */
+  timeoutMs?: number;
+  /** What to do on timeout; defaults to "reject". */
+  timeoutPolicy?: "approve" | "reject";
 }

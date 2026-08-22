@@ -21,6 +21,8 @@ export function TaskPage() {
   const [preview, setPreview] = useState<{ key: string; text: string } | null>(null);
   const [injectText, setInjectText] = useState("");
   const [rejectText, setRejectText] = useState("");
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [editText, setEditText] = useState("");
   const [planDoc, setPlanDoc] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -130,6 +132,7 @@ export function TaskPage() {
 
   useEffect(() => {
     if (pendingReqId) void loadPlanDoc();
+    else setEditingPlan(false);
   }, [pendingReqId, loadPlanDoc]);
 
   const act = async (fn: () => Promise<unknown>) => {
@@ -235,6 +238,40 @@ export function TaskPage() {
                   </div>
                   {planLoading ? (
                     <p className="muted">加载计划中…</p>
+                  ) : editingPlan ? (
+                    <div className="plan-doc">
+                      <textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        rows={18}
+                        style={{ width: "100%", fontFamily: "monospace" }}
+                      />
+                      <div className="row" style={{ marginTop: 8 }}>
+                        <button
+                          className="btn btn-primary"
+                          type="button"
+                          disabled={!editText.trim()}
+                          onClick={() =>
+                            void act(async () => {
+                              await api.intervene(task.id, pendingReqId, {
+                                action: "edit",
+                                content: editText,
+                              });
+                              setEditingPlan(false);
+                            })
+                          }
+                        >
+                          保存并 Approve
+                        </button>
+                        <button
+                          className="btn"
+                          type="button"
+                          onClick={() => setEditingPlan(false)}
+                        >
+                          取消编辑
+                        </button>
+                      </div>
+                    </div>
                   ) : planDoc ? (
                     <div className="plan-doc">
                       <Markdown content={planDoc} />
@@ -254,6 +291,16 @@ export function TaskPage() {
                     }
                   >
                     Approve
+                  </button>
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={() => {
+                      setEditText(planDoc ?? "");
+                      setEditingPlan(true);
+                    }}
+                  >
+                    编辑计划…
                   </button>
                   <input
                     placeholder="驳回意见"
@@ -666,6 +713,7 @@ function stateClass(status: Task["status"]): string {
     case "waiting_human":
       return "State--waiting";
     case "done":
+    case "merged":
       return "State--done";
     case "failed":
     case "cancelled":

@@ -68,6 +68,47 @@ export class EventSync {
     this.store.updateInstance(instanceId, { last_seen_at: new Date().toISOString() });
   }
 
+  /**
+   * Terminal-fail a task, or requeue it with exponential backoff while the
+   * retry budget allows. Non-retryable errors (budget exhaustion, bad config)
+   * skip the queue.
+   */
+  handleTaskFailure(taskId: string, message: string): void {
+    const task = this.store.getTask(taskId);
+    if (!task) return;
+    // Only clearly-permanent errors skip the queue; transient lookalikes are
+    // better absorbed by the retry budget (bounded) than lost forever.
+    const nonRetryable =
+      /budget exceeded|invalid duration|missing engine config|requirement required/i.test(
+        message,
+      );
+    const count = task.retry_count ?? 0;
+    const { maxRetries, baseDelayMs } = this.config.scheduler.retry;
+
+    if (!nonRetryable && count < maxRetries) {
+      const delayMs = baseDelayMs * Math.pow(5, count);
+      const nextRetryAt = new Date(Date.now() + delayMs).toISOString();
+      this.store.updateTask(taskId, {
+        status: "queued",
+        error: `${message} — auto retry ${count + 1}/${maxRetries} at ${nextRetryAt}`,
+        retry_count: count + 1,
+        next_retry_at: nextRetryAt,
+        instance_id: null,
+        kernel_task_id: null,
+        // ci-fix must keep running against the PR branch; fresh tasks get a
+        // new branch from the kernel (the old one may still be checked out).
+        branch: task.source === "ci-fix" ? task.branch : null,
+      });
+      return;
+    }
+
+    this.store.updateTask(taskId, {
+      status: "failed",
+      error: message,
+      next_retry_at: null,
+    });
+  }
+
   /** Mark kernel instance idle so the scheduler can reuse it. */
   releaseInstance(instanceId: string | null | undefined): void {
     if (!instanceId) return;
@@ -135,10 +176,7 @@ export class EventSync {
     }
 
     if (event.type === "task.failed") {
-      this.store.updateTask(task.id, {
-        status: "failed",
-        error: String(payload.error ?? "failed"),
-      });
+      this.handleTaskFailure(task.id, String(payload.error ?? "failed"));
       this.releaseInstance(task.instance_id);
       await this.reportProgress(task.id, true);
     }
@@ -224,17 +262,18 @@ export class EventSync {
         try {
           await this.repos.pushBranch(repo.clone_path, task.branch, token);
         } catch (err) {
-          this.store.updateTask(taskId, {
-            status: "failed",
-            error: `push failed: ${err instanceof Error ? err.message : err}`,
-          });
+          this.handleTaskFailure(
+            taskId,
+            `push failed: ${err instanceof Error ? err.message : err}`,
+          );
           this.releaseInstance(task.instance_id);
           this.hub({ type: "task.updated", payload: this.store.getTask(taskId) });
           return;
         }
       }
 
-      if (task.issue_number && token && task.branch) {
+      // ci-fix pushes onto the existing PR branch — the PR updates itself; no new PR.
+      if (task.issue_number && token && task.branch && task.source !== "ci-fix") {
         try {
           const adapter = new GitHubAdapter(token);
           const base = repo.default_branch || this.config.defaultBaseBranch;
@@ -255,15 +294,37 @@ export class EventSync {
           this.store.updateTask(taskId, { pr_number: pr.number, status: "done" });
           await this.reportProgress(taskId, true);
         } catch (err) {
-          this.store.updateTask(taskId, {
-            status: "failed",
-            error: `PR failed: ${err instanceof Error ? err.message : err}`,
-          });
+          this.handleTaskFailure(
+            taskId,
+            `PR failed: ${err instanceof Error ? err.message : err}`,
+          );
           this.releaseInstance(task.instance_id);
           this.hub({ type: "task.updated", payload: this.store.getTask(taskId) });
           return;
         }
       } else {
+        if (token && task.source === "ci-fix") {
+          const parent = task.parent_task_id
+            ? this.store.getTask(task.parent_task_id)
+            : undefined;
+          if (parent?.issue_number) {
+            try {
+              await new GitHubAdapter(token).postProgress(
+                {
+                  repo: { platform: "github", fullName: repo.full_name },
+                  number: parent.issue_number,
+                },
+                {
+                  summary: `CI fix pushed to \`${task.branch}\` by task \`${task.id}\` — waiting for checks.`,
+                  status: "running",
+                  branch: task.branch ?? undefined,
+                },
+              );
+            } catch {
+              // best effort
+            }
+          }
+        }
         this.store.updateTask(taskId, { status: "done" });
       }
 

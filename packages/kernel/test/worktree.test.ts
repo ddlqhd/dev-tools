@@ -48,6 +48,31 @@ test("createTaskWorktree: creates branch + linked worktree", async () => {
   }
 });
 
+test("createTaskWorktree: existingBranch reclaims a branch held by a stale worktree", async () => {
+  const stalePath = join(repo, "stale-wt");
+  git(repo, ["worktree", "add", "-b", "feature", stalePath]);
+  git(stalePath, ["commit", "--allow-empty", "-m", "wip on feature"]);
+
+  const wt = await createTaskWorktree({
+    repoPath: repo,
+    worktreeRoot: join(repo, ".codeloop", "worktrees"),
+    branchPrefix: "codeloop/",
+    taskId: "fix1",
+    existingBranch: "feature",
+  });
+  try {
+    assert.equal(wt.branch, "feature");
+    // The stale worktree must have been removed, the new one holds the branch.
+    assert.equal(git(repo, ["worktree", "list"]).includes(stalePath), false);
+    assert.equal(git(repo, ["worktree", "list"]).includes(wt.worktreePath), true);
+    // Task base is the branch head (not repo HEAD).
+    assert.equal(wt.baseCommit, git(repo, ["rev-parse", "feature"]));
+    assert.equal(await wt.commitCountSince(wt.baseCommit), 0);
+  } finally {
+    git(repo, ["worktree", "remove", "--force", wt.worktreePath]);
+  }
+});
+
 test("WorktreeHandle: commit lifecycle and git queries", async () => {
   const wt = await createTaskWorktree({
     repoPath: repo,

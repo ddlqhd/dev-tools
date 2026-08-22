@@ -312,6 +312,9 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
       error: null,
       instance_id: null,
       kernel_task_id: null,
+      branch: task.source === "ci-fix" ? task.branch : null,
+      retry_count: 0,
+      next_retry_at: null,
     });
     void scheduler.tick();
     return { task: store.getTask(task.id) };

@@ -5,6 +5,7 @@ export type TaskStatus =
   | "waiting_human"
   | "delivering"
   | "done"
+  | "merged"
   | "failed"
   | "cancelled";
 
@@ -211,7 +212,7 @@ export const api = {
   intervene: (
     id: string,
     reqId: string,
-    decision: { action: string; comments?: unknown[]; note?: string },
+    decision: { action: string; comments?: unknown[]; content?: string },
   ) =>
     req(`/api/tasks/${id}/interventions/${reqId}`, {
       method: "POST",

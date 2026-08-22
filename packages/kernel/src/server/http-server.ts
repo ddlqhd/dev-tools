@@ -184,6 +184,8 @@ async function handleHttp(
         requirement: string;
         repoPath?: string;
         pipeline?: string;
+        baseBranch?: string;
+        branch?: string;
         configOverrides?: {
           autoApproveGates?: boolean;
           inplace?: boolean;
@@ -198,6 +200,8 @@ async function handleHttp(
         requirement: body.requirement,
         repoPath: body.repoPath ?? runtime.repoPath,
         pipeline: body.pipeline,
+        baseBranch: body.baseBranch,
+        existingBranch: body.branch,
         autoApproveGates: body.configOverrides?.autoApproveGates,
         inplace: body.configOverrides?.inplace,
         sandbox: body.configOverrides?.sandbox,

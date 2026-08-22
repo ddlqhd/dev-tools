@@ -39,6 +39,10 @@ export interface CreateTaskOptions {
   requirement: string;
   repoPath: string;
   pipeline?: string;
+  /** Ref the task branch starts from; defaults to repo HEAD. */
+  baseBranch?: string;
+  /** Reuse this existing branch (e.g. a delivered PR branch) instead of a new one. */
+  existingBranch?: string;
   autoApproveGates?: boolean;
   /** Run in the repo checkout instead of a dedicated worktree. */
   inplace?: boolean;
@@ -191,6 +195,50 @@ export class TaskHandle {
     if (this.runtimeConfig.autoApproveGates && req.kind === "gate") {
       return { action: "approve" };
     }
+    const waitPromise = this.waitForInterventionParked(req);
+    if (!req.timeoutMs || !(req.timeoutMs > 0)) {
+      return waitPromise;
+    }
+    const policy = req.timeoutPolicy ?? "reject";
+    const timeoutDecision: InterventionDecision =
+      policy === "approve"
+        ? { action: "approve", auto: true }
+        : {
+            action: "reject",
+            comments: [
+              {
+                id: `gate-timeout-${req.requestId.slice(0, 8)}`,
+                severity: "major",
+                comment: `Gate timed out after ${Math.round(req.timeoutMs / 1000)}s without a decision`,
+                status: "open",
+              },
+            ],
+            auto: true,
+          };
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<InterventionDecision>((resolve) => {
+      timer = setTimeout(() => {
+        // Drop the parked waiter so a late human resolution fails cleanly
+        // instead of feeding a pipeline that has already moved on.
+        if (this.pending?.request.requestId === req.requestId) {
+          this.pending = null;
+          this.runtime.clearIntervention(this.taskId);
+          this.clearCheckpointIntervention();
+        }
+        resolve(timeoutDecision);
+      }, req.timeoutMs);
+    });
+
+    // If the timer already won, a later pause()/abort() may still reject the
+    // parked waiter — absorb that rejection so it can't crash the process.
+    waitPromise.catch(() => undefined);
+    return Promise.race([waitPromise, timeoutPromise]).finally(() => clearTimeout(timer));
+  }
+
+  private async waitForInterventionParked(
+    req: InterventionRequest,
+  ): Promise<InterventionDecision> {
     const deferred = await this.consumeDeferredDecision();
     if (deferred) return deferred;
     if (this.interventionHandler) {
@@ -494,7 +542,10 @@ export class KernelRuntime {
       );
     }
 
-    if (config.inplace) {
+    // ci-fix-style tasks must run on their own worktree: inplace mode would
+    // silently drop the existingBranch and commit onto the repo checkout.
+    const useInplace = config.inplace && !opts.existingBranch;
+    if (useInplace) {
       const active = this.findActiveInplaceTask(opts.repoPath);
       if (active) {
         throw new Error(
@@ -509,7 +560,7 @@ export class KernelRuntime {
     await snapshotPipeline(pipeline, dirs.taskDir);
 
     let worktree: GitWorktree;
-    if (config.inplace) {
+    if (useInplace) {
       worktree = await createInplaceWorktree(opts.repoPath);
     } else {
       const worktreeRoot = join(opts.repoPath, config.git.worktreeRoot);
@@ -518,6 +569,8 @@ export class KernelRuntime {
         worktreeRoot,
         branchPrefix: config.git.branchPrefix,
         taskId,
+        baseRef: opts.baseBranch,
+        existingBranch: opts.existingBranch,
       });
       await linkRepoNodeModules(opts.repoPath, worktree.worktreePath);
     }

@@ -6,7 +6,7 @@ const COLUMNS: Array<{ key: TaskStatus | "active"; title: string; match: TaskSta
   { key: "queued", title: "排队", match: ["queued", "preparing"] },
   { key: "running", title: "运行中", match: ["running", "delivering"] },
   { key: "waiting_human", title: "等人", match: ["waiting_human"] },
-  { key: "done", title: "完成", match: ["done"] },
+  { key: "done", title: "完成", match: ["done", "merged"] },
   { key: "failed", title: "失败", match: ["failed", "cancelled"] },
 ];
 

@@ -26,6 +26,9 @@ export class KernelClient {
     requirement: string;
     repoPath?: string;
     pipeline?: string;
+    baseBranch?: string;
+    /** Reuse this existing branch (e.g. a delivered PR branch) for ci-fix runs. */
+    branch?: string;
     configOverrides?: { autoApproveGates?: boolean; inplace?: boolean; sandbox?: boolean };
   }): Promise<{ taskId: string; branch: string }> {
     const res = await fetch(`${this.endpoint}/tasks`, {

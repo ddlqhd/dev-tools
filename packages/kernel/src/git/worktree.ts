@@ -35,16 +35,73 @@ export async function createTaskWorktree(opts: {
   branchPrefix: string;
   taskId: string;
   baseRef?: string;
+  /** Check out this existing branch instead of creating codeloop/<taskId>. */
+  existingBranch?: string;
 }): Promise<GitWorktree> {
-  const branch = `${opts.branchPrefix}${opts.taskId}`;
+  const branch = opts.existingBranch || `${opts.branchPrefix}${opts.taskId}`;
   const worktreePath = join(opts.worktreeRoot, opts.taskId);
   await mkdir(dirname(worktreePath), { recursive: true });
+
+  if (opts.existingBranch) {
+    // Make sure we actually have the branch locally (e.g. pushed by another
+    // machine); fetch it from origin when missing.
+    const local = await git(opts.repoPath, ["rev-parse", "--verify", branch]).catch(() => null);
+    if (!local) {
+      await git(opts.repoPath, ["fetch", "origin", branch]);
+      await git(opts.repoPath, [
+        "worktree",
+        "add",
+        "--track",
+        "-b",
+        branch,
+        worktreePath,
+        `origin/${branch}`,
+      ]);
+    } else {
+      // Best-effort fast-forward to origin before starting (branch is not
+      // checked out anywhere yet, so updating the ref is safe).
+      await git(opts.repoPath, ["fetch", "origin", `${branch}:${branch}`]).catch(() => undefined);
+      // A delivered task's worktree may still hold the branch checked out
+      // (worktrees are not auto-removed after completion). Such a worktree is
+      // inert — its task is done — so reclaim the branch before adding ours.
+      const holder = await findWorktreeHoldingBranch(opts.repoPath, branch);
+      if (holder) {
+        await git(opts.repoPath, ["worktree", "remove", "--force", holder]).catch(() => undefined);
+      }
+      await git(opts.repoPath, ["worktree", "add", worktreePath, branch]);
+    }
+    // The task starts from the branch head, not the repo checkout's HEAD.
+    const startCommit = (await git(opts.repoPath, ["rev-parse", branch])).trim();
+    return new WorktreeHandle(opts.repoPath, worktreePath, branch, startCommit);
+  }
 
   const base = opts.baseRef ?? "HEAD";
   const baseCommit = (await git(opts.repoPath, ["rev-parse", base])).trim();
   await git(opts.repoPath, ["worktree", "add", "-b", branch, worktreePath, baseCommit]);
 
   return new WorktreeHandle(opts.repoPath, worktreePath, branch, baseCommit);
+}
+
+/**
+ * Path of the worktree currently holding `branch` checked out, if any.
+ * Parses `git worktree list --porcelain` (entries: worktree/HEAD/branch…).
+ */
+async function findWorktreeHoldingBranch(
+  repoPath: string,
+  branch: string,
+): Promise<string | null> {
+  const out = await git(repoPath, ["worktree", "list", "--porcelain"]).catch(() => "");
+  const target = `refs/heads/${branch}`;
+  let currentPath: string | null = null;
+  for (const line of out.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      currentPath = line.slice("worktree ".length).trim();
+    } else if (line.startsWith("branch ") && currentPath) {
+      if (line.slice("branch ".length).trim() === target) return currentPath;
+      currentPath = null;
+    }
+  }
+  return null;
 }
 
 /**
