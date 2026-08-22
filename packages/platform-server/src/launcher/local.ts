@@ -47,6 +47,15 @@ export class LocalProcessLauncher implements InstanceLauncher {
       env: { ...process.env },
       detached: false,
     });
+    const output = collectProcessOutput(child);
+    let spawnError: Error | undefined;
+    let closed: { code: number | null } | undefined;
+    child.once("error", (err) => {
+      spawnError = err;
+    });
+    child.once("close", (code) => {
+      closed = { code };
+    });
 
     const id = `inst_${port}_${Date.now().toString(36)}`;
     const endpoint = `http://127.0.0.1:${port}`;
@@ -62,8 +71,11 @@ export class LocalProcessLauncher implements InstanceLauncher {
     const client = new KernelClient(endpoint, token);
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
-      if (child.exitCode !== null) {
-        throw new Error(`codeloop serve exited early with code ${child.exitCode}`);
+      if (spawnError) {
+        throw new Error(`codeloop serve failed to spawn: ${spawnError.message}`);
+      }
+      if (closed) {
+        throw new Error(serveExitError(closed.code, output.text()));
       }
       if (await client.health()) return handle;
       await sleep(300);
@@ -107,4 +119,26 @@ function freePort(): Promise<number> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+const OUTPUT_CAP = 8_000;
+
+function collectProcessOutput(child: ChildProcess): { text(): string } {
+  let buf = "";
+  const append = (chunk: Buffer | string) => {
+    buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    if (buf.length > OUTPUT_CAP) buf = buf.slice(-OUTPUT_CAP);
+  };
+  child.stdout?.on("data", append);
+  child.stderr?.on("data", append);
+  return { text: () => buf.trim() };
+}
+
+/** Visible for tests. */
+export function serveExitError(code: number | null, output: string): string {
+  const base = `codeloop serve exited early with code ${code}`;
+  if (!output) return base;
+  const oneLine = output.replace(/\s+/g, " ").trim();
+  const clipped = oneLine.length > 800 ? `${oneLine.slice(0, 800)}…` : oneLine;
+  return `${base} — ${clipped}`;
 }

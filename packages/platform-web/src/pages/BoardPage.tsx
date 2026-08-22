@@ -148,6 +148,11 @@ export function BoardPage() {
                     {t.current_node && <span className="Label Label--accent">{t.current_node}</span>}
                     {t.branch && <span className="Label">{t.branch}</span>}
                   </div>
+                  {t.error && (
+                    <p className="board-card-error" title={t.error}>
+                      {t.error}
+                    </p>
+                  )}
                 </Link>
               ))}
             </section>

@@ -486,6 +486,19 @@ label {
   gap: 6px;
 }
 
+.board-card-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--danger-fg);
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
 /* Issue-style task header */
 .issue-title {
   margin: 0 0 8px;
