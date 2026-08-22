@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { taskActionsEnabled } from "@devtools/shared";
+import {
+  buildTaskDetail,
+  kernelStatusFromPlatform,
+  parseStoredKernelEvents,
+  taskActionsEnabled,
+} from "@devtools/shared";
 import { Markdown } from "../components/Markdown";
 import {
   api,
@@ -12,6 +17,30 @@ import {
   type TaskDetail,
   type TaskEvent,
 } from "../api";
+
+function detailFromEvents(task: Task, repo: Repo | null, events: TaskEvent[]): TaskDetail {
+  return buildTaskDetail(
+    {
+      taskId: task.kernel_task_id ?? task.id,
+      requirement: task.requirement,
+      status: kernelStatusFromPlatform(task.status),
+      currentNode: task.current_node,
+      error: task.error,
+      createdAt: task.created_at,
+      updatedAt: task.updated_at,
+      pipeline: { name: task.pipeline_name ?? "", hash: "" },
+      git: {
+        repoPath: repo?.clone_path ?? "",
+        worktreePath: "",
+        branch: task.branch ?? "",
+        baseCommit: "",
+      },
+      artifacts: [],
+      pendingIntervention: null,
+    },
+    parseStoredKernelEvents(events),
+  );
+}
 
 export function TaskPage() {
   const { id = "" } = useParams();
@@ -39,9 +68,10 @@ export function TaskPage() {
     setEvents(ev.events);
     try {
       const d = await api.getDetail(id);
-      setDetail(d.detail);
+      setDetail(d.detail.stages.length > 0 ? d.detail : detailFromEvents(info.task, info.repo, ev.events));
     } catch {
-      // 未绑定内核或内核已下线时保留旧详情，页面降级为事件流
+      // 内核已释放：用平台落库的事件重折阶段，避免退化成节点平铺
+      setDetail(detailFromEvents(info.task, info.repo, ev.events));
     }
   };
 
@@ -679,9 +709,10 @@ function StageCard({
 
 function EventTimeline({ events }: { events: TaskEvent[] }) {
   if (!events.length) return <p className="muted">该区间无事件记录</p>;
+  const chronological = [...events].sort((a, b) => a.seq - b.seq);
   return (
     <ul className="timeline">
-      {[...events].reverse().map((e) => (
+      {chronological.map((e) => (
         <li key={`${e.seq}`}>
           <span className={`dot ${dotClass(e.type)}`} />
           <span className="ts">{fmtClock(e.ts)}</span>

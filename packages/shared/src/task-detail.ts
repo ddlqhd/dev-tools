@@ -112,3 +112,18 @@ export interface TaskDetail {
   eventCount: number;
   lastSeq: number;
 }
+
+/** Inputs needed to fold an event log into {@link TaskDetail}. */
+export interface TaskDetailSource {
+  taskId: string;
+  requirement: string;
+  status: string;
+  currentNode: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  pipeline: { name: string; hash: string };
+  git: TaskDetail["git"];
+  artifacts?: ArtifactFile[];
+  pendingIntervention?: InterventionRequest | null;
+}
