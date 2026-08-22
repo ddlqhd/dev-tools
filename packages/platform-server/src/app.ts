@@ -12,6 +12,7 @@ import { PlatformStore } from "./db/store.js";
 import { KernelClient } from "./kernel-client.js";
 import { LocalProcessLauncher } from "./launcher/local.js";
 import { publicInstance, publicRepo } from "./public.js";
+import { formatConfigError, getConfigMeta, loadRepoConfig, parseRepoConfig, saveRepoConfig } from "./repo-config.js";
 import { RepoManager } from "./repo-manager.js";
 import { Scheduler } from "./scheduler.js";
 import { EventSync } from "./sync.js";
@@ -143,6 +144,30 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
       return { repo: publicRepo(store.getRepo(req.params.id)!) };
     },
   );
+
+  app.get("/api/config/meta", async () => getConfigMeta());
+
+  app.get<{ Params: { id: string } }>("/api/repos/:id/config", async (req, reply) => {
+    const repo = store.getRepo(req.params.id);
+    if (!repo) return reply.code(404).send({ error: "not found" });
+    try {
+      return await loadRepoConfig(repo.clone_path);
+    } catch (err) {
+      return reply.code(400).send({ error: formatConfigError(err) });
+    }
+  });
+
+  app.put<{ Params: { id: string }; Body: unknown }>("/api/repos/:id/config", async (req, reply) => {
+    const repo = store.getRepo(req.params.id);
+    if (!repo) return reply.code(404).send({ error: "not found" });
+    try {
+      const parsed = parseRepoConfig(req.body);
+      const config = await saveRepoConfig(repo.clone_path, parsed);
+      return { config };
+    } catch (err) {
+      return reply.code(400).send({ error: formatConfigError(err) });
+    }
+  });
 
   app.get<{ Querystring: { status?: string; repo?: string } }>("/api/tasks", async (req) => {
     const repoId = req.query.repo

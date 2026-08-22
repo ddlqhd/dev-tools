@@ -75,6 +75,9 @@ importers:
 
   packages/platform-server:
     dependencies:
+      '@devtools/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       '@devtools/shared':
         specifier: workspace:*
         version: link:../shared

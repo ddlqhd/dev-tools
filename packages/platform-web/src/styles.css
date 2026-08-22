@@ -698,6 +698,38 @@ ul.plain li:last-child {
   white-space: pre-wrap;
 }
 
+.success {
+  color: var(--success-fg);
+  margin: 0;
+}
+
+.check-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+label.check {
+  flex-direction: row;
+  align-items: center;
+  font-weight: 500;
+  min-width: 0;
+}
+
+label.check input[type="checkbox"] {
+  width: auto;
+  box-shadow: none;
+}
+
+.engine-table input,
+.engine-table select {
+  width: 100%;
+}
+
+.engine-table td {
+  vertical-align: middle;
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: 1.2fr 1fr;

@@ -20,6 +20,36 @@ export interface Repo {
   has_github_token?: boolean;
 }
 
+export interface EngineConfig {
+  type: string;
+  model?: string;
+}
+
+/** Mirrors kernel CodeloopConfig over the platform API. */
+export interface CodeloopConfig {
+  version: 1;
+  pipeline: string;
+  pipelineOverrides?: Record<string, unknown>;
+  engines: Record<string, EngineConfig>;
+  budget: {
+    maxEngineCalls: number;
+    nodeTimeoutMinutes: number;
+  };
+  git: {
+    branchPrefix: string;
+    worktreeRoot: string;
+  };
+  autoApproveGates: boolean;
+  skipVerifyIfMissing: boolean;
+  inplace: boolean;
+  sandbox: boolean;
+}
+
+export interface ConfigMeta {
+  pipelines: string[];
+  engines: Array<{ id: string; label: string }>;
+}
+
 export interface Task {
   id: string;
   repo_id: string;
@@ -175,6 +205,14 @@ export const api = {
     defaultBranch?: string;
   }) =>
     req<{ repo: Repo }>("/api/repos", { method: "POST", body: JSON.stringify(body) }),
+  getConfigMeta: () => req<ConfigMeta>("/api/config/meta"),
+  getRepoConfig: (id: string) =>
+    req<{ config: CodeloopConfig; pipelines: string[] }>(`/api/repos/${id}/config`),
+  putRepoConfig: (id: string, config: CodeloopConfig) =>
+    req<{ config: CodeloopConfig }>(`/api/repos/${id}/config`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
   listTasks: () => req<{ tasks: Task[] }>("/api/tasks"),
   createTask: (body: {
     repoId: string;

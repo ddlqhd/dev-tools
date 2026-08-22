@@ -4,6 +4,7 @@ import { BoardPage } from "./pages/BoardPage";
 import { TaskPage } from "./pages/TaskPage";
 import { ReposPage } from "./pages/ReposPage";
 import { InstancesPage } from "./pages/InstancesPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { useTheme, type ThemeChoice } from "./theme";
 
 function MarkIcon() {
@@ -64,6 +65,9 @@ export function App() {
           <NavLink to="/instances" className={({ isActive }) => `Header-link${isActive ? " active" : ""}`}>
             实例
           </NavLink>
+          <NavLink to="/settings" className={({ isActive }) => `Header-link${isActive ? " active" : ""}`}>
+            配置
+          </NavLink>
         </nav>
         <div className="theme-toggle" role="group" aria-label="主题">
           {THEME_OPTIONS.map((opt) => (
@@ -85,6 +89,7 @@ export function App() {
           <Route path="/tasks/:id" element={<TaskPage />} />
           <Route path="/repos" element={<ReposPage />} />
           <Route path="/instances" element={<InstancesPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
     </>
