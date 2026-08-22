@@ -13,12 +13,14 @@ const COLUMNS: Array<{ key: TaskStatus | "active"; title: string; match: TaskSta
 export function BoardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [pipelines, setPipelines] = useState<string[]>([]);
+  const [pipelinesLoading, setPipelinesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     repoId: "",
     title: "",
     requirement: "",
-    pipeline: "m1-minimal",
+    pipeline: "",
   });
 
   const reload = async () => {
@@ -54,10 +56,43 @@ export function BoardPage() {
     return off;
   }, []);
 
+  useEffect(() => {
+    if (!form.repoId) {
+      setPipelines([]);
+      setForm((f) => ({ ...f, pipeline: "" }));
+      setPipelinesLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPipelinesLoading(true);
+    void api
+      .getRepoConfig(form.repoId)
+      .then((res) => {
+        if (cancelled) return;
+        setPipelines(res.pipelines);
+        setForm((f) => ({ ...f, pipeline: res.config.pipeline }));
+      })
+      .catch((e: Error) => {
+        if (cancelled) return;
+        setPipelines([]);
+        setForm((f) => ({ ...f, pipeline: "" }));
+        setError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setPipelinesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.repoId]);
+
   const repoName = useMemo(() => {
     const m = new Map(repos.map((r) => [r.id, r.full_name]));
     return (id: string) => m.get(id) ?? id;
   }, [repos]);
+
+  const pipelineOptions =
+    form.pipeline && !pipelines.includes(form.pipeline) ? [form.pipeline, ...pipelines] : pipelines;
 
   const create = async () => {
     setError(null);
@@ -98,11 +133,17 @@ export function BoardPage() {
           </label>
           <label>
             Pipeline
-            <input
+            <select
               value={form.pipeline}
               onChange={(e) => setForm({ ...form, pipeline: e.target.value })}
-              placeholder="m1-minimal"
-            />
+              disabled={pipelinesLoading || !form.repoId || pipelineOptions.length === 0}
+            >
+              {pipelineOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             标题
@@ -120,7 +161,12 @@ export function BoardPage() {
               placeholder="描述要实现的改动…"
             />
           </label>
-          <button className="btn btn-primary" type="button" onClick={() => void create()} disabled={!form.repoId || !form.requirement}>
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={() => void create()}
+            disabled={!form.repoId || !form.requirement || !form.pipeline || pipelinesLoading}
+          >
             入队
           </button>
           {error && <p className="error">{error}</p>}
