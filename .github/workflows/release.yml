@@ -53,14 +53,7 @@ jobs:
         run: |
           VERSION=$(tr -d '[:space:]' < VERSION)
           TGZ=$(ls release/artifacts/*.tgz | head -n1)
+          NOTES=$(printf 'Install:\n\n```bash\nnpm i -g ./%s\ncodeloop doctor\ncodeloop-platform\n```\n\nRequires Node.js ≥ 22.13, git, and Cursor Agent CLI (`agent login`).\n' "${TGZ##*/}")
           gh release create "v${VERSION}" "$TGZ" \
             --title "v${VERSION}" \
-            --notes "Install:
-
-\`\`\`bash
-npm i -g ./${TGZ##*/}
-codeloop doctor
-codeloop-platform
-\`\`\`
-
-Requires Node.js ≥ 22.13, git, and Cursor Agent CLI (\`agent login\`)."
+            --notes "$NOTES"
