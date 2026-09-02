@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { BoardPage } from "./pages/BoardPage";
 import { TaskPage } from "./pages/TaskPage";
+import { NodeEventsPage } from "./pages/NodeEventsPage";
 import { ReposPage } from "./pages/ReposPage";
 import { InstancesPage } from "./pages/InstancesPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -87,6 +88,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<BoardPage />} />
           <Route path="/tasks/:id" element={<TaskPage />} />
+          <Route path="/tasks/:id/nodes/:nodeId" element={<NodeEventsPage />} />
           <Route path="/repos" element={<ReposPage />} />
           <Route path="/instances" element={<InstancesPage />} />
           <Route path="/settings" element={<SettingsPage />} />

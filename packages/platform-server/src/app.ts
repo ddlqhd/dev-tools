@@ -8,6 +8,7 @@ import fastifyStatic from "@fastify/static";
 import WebSocket from "ws";
 import type { InterventionDecision } from "@devtools/shared";
 import { buildPlatformTaskDetail } from "./task-detail.js";
+import { listTaskEvents } from "./task-events.js";
 import type { PlatformConfig } from "./config.js";
 import { PlatformStore } from "./db/store.js";
 import { KernelClient } from "./kernel-client.js";
@@ -220,17 +221,22 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
   app.get<{ Params: { id: string }; Querystring: { after?: string } }>(
     "/api/tasks/:id/events",
     async (req, reply) => {
-      if (!store.getTask(req.params.id)) return reply.code(404).send({ error: "not found" });
-      return { events: store.listEvents(req.params.id, Number(req.query.after ?? "0")) };
+      const task = store.getTask(req.params.id);
+      if (!task) return reply.code(404).send({ error: "not found" });
+      const repo = store.getRepo(task.repo_id) ?? null;
+      return { events: await listTaskEvents(store, task, repo, Number(req.query.after ?? "0")) };
     },
   );
 
   app.get<{ Params: { id: string } }>("/api/tasks/:id/detail", async (req, reply) => {
     const task = store.getTask(req.params.id);
     if (!task) return reply.code(404).send({ error: "not found" });
-    const fromStore = () => ({
-      detail: buildPlatformTaskDetail(task, store.getRepo(task.repo_id) ?? null, store.listEvents(task.id)),
-    });
+    const fromStore = async () => {
+      const repo = store.getRepo(task.repo_id) ?? null;
+      return {
+        detail: await buildPlatformTaskDetail(task, repo, await listTaskEvents(store, task, repo)),
+      };
+    };
     if (!task.instance_id || !task.kernel_task_id) return fromStore();
     const inst = store.getInstance(task.instance_id);
     if (!inst) return fromStore();

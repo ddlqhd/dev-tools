@@ -1,54 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import {
-  buildTaskDetail,
-  kernelStatusFromPlatform,
-  parseStoredKernelEvents,
-  taskActionsEnabled,
-} from "@devtools/shared";
+import { buildWorkflowView, countWorkflowNodes, taskActionsEnabled } from "@devtools/shared";
 import { Markdown } from "../components/Markdown";
 import {
   api,
-  connectHub,
-  type KernelTaskSnapshot,
-  type Repo,
-  type StageExecution,
-  type Task,
   type TaskDetail,
-  type TaskEvent,
+  type WorkflowNodeView,
+  type WorkflowStepView,
+  type WorkflowView,
 } from "../api";
-
-function detailFromEvents(task: Task, repo: Repo | null, events: TaskEvent[]): TaskDetail {
-  return buildTaskDetail(
-    {
-      taskId: task.kernel_task_id ?? task.id,
-      requirement: task.requirement,
-      status: kernelStatusFromPlatform(task.status),
-      currentNode: task.current_node,
-      error: task.error,
-      createdAt: task.created_at,
-      updatedAt: task.updated_at,
-      pipeline: { name: task.pipeline_name ?? "", hash: "" },
-      git: {
-        repoPath: repo?.clone_path ?? "",
-        worktreePath: "",
-        branch: task.branch ?? "",
-        baseCommit: "",
-      },
-      artifacts: [],
-      pendingIntervention: null,
-    },
-    parseStoredKernelEvents(events),
-  );
-}
+import { fmtBytes, fmtClock, fmtDuration, prettyJson, stageLabelClass, stageToneClass, stateClass } from "../format";
+import { useTaskLive } from "../useTaskLive";
 
 export function TaskPage() {
   const { id = "" } = useParams();
-  const [task, setTask] = useState<Task | null>(null);
-  const [repo, setRepo] = useState<Repo | null>(null);
-  const [kernel, setKernel] = useState<KernelTaskSnapshot | null>(null);
-  const [detail, setDetail] = useState<TaskDetail | null>(null);
-  const [events, setEvents] = useState<TaskEvent[]>([]);
+  const { task, repo, kernel, detail, error, setError, reload } = useTaskLive(id);
   const [preview, setPreview] = useState<{ key: string; text: string } | null>(null);
   const [injectText, setInjectText] = useState("");
   const [rejectText, setRejectText] = useState("");
@@ -57,23 +23,6 @@ export function TaskPage() {
   const [planDoc, setPlanDoc] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const reloadDetail = async () => {
-    const info = await api.getTask(id);
-    setTask(info.task);
-    setRepo(info.repo);
-    setKernel(info.kernel);
-    const ev = await api.listEvents(id);
-    setEvents(ev.events);
-    try {
-      const d = await api.getDetail(id);
-      setDetail(d.detail.stages.length > 0 ? d.detail : detailFromEvents(info.task, info.repo, ev.events));
-    } catch {
-      // 内核已释放：用平台落库的事件重折阶段，避免退化成节点平铺
-      setDetail(detailFromEvents(info.task, info.repo, ev.events));
-    }
-  };
 
   const loadArtifact = async (key: string) => {
     try {
@@ -82,65 +31,6 @@ export function TaskPage() {
       setPreview({ key, text: `读取失败: ${e instanceof Error ? e.message : String(e)}` });
     }
   };
-
-  useEffect(() => {
-    setPreview(null);
-    setDetail(null);
-    setPlanDoc(null);
-    setPlanError(null);
-    void reloadDetail().catch((e: Error) => setError(e.message));
-
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const scheduleDetail = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        void reloadDetail().catch(() => undefined);
-      }, 400);
-    };
-
-    const off = connectHub((msg) => {
-      if (msg.type === "task.updated") {
-        const t = msg.payload as Task;
-        if (t.id === id) {
-          setTask(t);
-          scheduleDetail();
-        }
-      }
-      if (msg.type === "task.event") {
-        const p = msg.payload as {
-          taskId: string;
-          event?: { type?: string; seq?: number; ts?: string; payload?: unknown };
-        };
-        if (p.taskId !== id) return;
-        if (p.event?.seq != null && p.event.type) {
-          const row: TaskEvent = {
-            task_id: id,
-            seq: p.event.seq,
-            ts: p.event.ts ?? new Date().toISOString(),
-            type: p.event.type,
-            payload:
-              typeof p.event.payload === "string"
-                ? p.event.payload
-                : JSON.stringify(p.event.payload ?? {}),
-          };
-          setEvents((prev) => (prev.some((e) => e.seq === row.seq) ? prev : [...prev, row]));
-        }
-        // 详情按节点边界重取，避免事件风暴打满内核
-        if (
-          p.event?.type === "node.started" ||
-          p.event?.type === "node.completed" ||
-          p.event?.type === "task.completed" ||
-          p.event?.type === "task.failed"
-        ) {
-          scheduleDetail();
-        }
-      }
-    });
-    return () => {
-      if (timer) clearTimeout(timer);
-      off();
-    };
-  }, [id]);
 
   const pendingReqId = kernel?.pendingIntervention?.requestId;
   const pendingIsLimit = kernel?.pendingIntervention?.kind === "limit";
@@ -176,11 +66,17 @@ export function TaskPage() {
     else setEditingPlan(false);
   }, [pendingReqId, loadPlanDoc]);
 
+  useEffect(() => {
+    setPreview(null);
+    setPlanDoc(null);
+    setPlanError(null);
+  }, [id]);
+
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
     try {
       await fn();
-      await reloadDetail();
+      await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -189,6 +85,8 @@ export function TaskPage() {
   if (!task || !actions) {
     return <p className="muted">{error ?? "加载中…"}</p>;
   }
+
+  const workflow = workflowOf(detail);
 
   return (
     <>
@@ -445,21 +343,18 @@ export function TaskPage() {
 
       <div className="Box">
         <div className="Box-header">
-          <h2>阶段时间线</h2>
-          {detail && <span className="Counter">{detail.stages.length}</span>}
+          <h2>流水线</h2>
+          {workflow && <span className="Counter">{countWorkflowNodes(workflow)}</span>}
         </div>
         <div className="Box-body">
-          {detail && detail.stages.length > 0 ? (
-            detail.stages.map((stage) => (
-              <StageCard
-                key={stage.index}
-                stage={stage}
-                events={events}
-                onArtifact={(key) => void loadArtifact(key)}
-              />
-            ))
+          {workflow && workflow.steps.length > 0 ? (
+            <div className="workflow">
+              {workflow.steps.map((step, i) => (
+                <WorkflowStep key={stepKey(step, i)} step={step} taskId={id} currentNode={task.current_node} />
+              ))}
+            </div>
           ) : (
-            <EventTimeline events={events} />
+            <p className="muted">无法还原流水线定义</p>
           )}
         </div>
       </div>
@@ -567,8 +462,75 @@ export function TaskPage() {
   );
 }
 
+function workflowOf(detail: TaskDetail | null): WorkflowView | null {
+  if (!detail) return null;
+  if (detail.workflow?.steps.length) return detail.workflow;
+  return buildWorkflowView(detail.pipeline.name, detail.stages);
+}
+
+function stepKey(step: WorkflowStepView, index: number): string {
+  return step.kind === "loop" ? `loop:${step.loop.loopId}` : `node:${step.node.nodeId}:${index}`;
+}
+
+function WorkflowStep({
+  step,
+  taskId,
+  currentNode,
+}: {
+  step: WorkflowStepView;
+  taskId: string;
+  currentNode: string | null;
+}) {
+  if (step.kind === "loop") {
+    const { loop } = step;
+    return (
+      <div className="workflow-loop">
+        <div className="workflow-loop-head">
+          <strong>{loop.loopId}</strong>
+          <span className="muted">
+            {loop.iteration != null ? `${loop.iteration}/${loop.maxIterations}` : `最多 ${loop.maxIterations} 次`}
+            {" · "}
+            until {loop.until}
+          </span>
+        </div>
+        <div className="workflow-loop-body">
+          {loop.body.map((node) => (
+            <WorkflowNode key={node.nodeId} node={node} taskId={taskId} current={node.nodeId === currentNode} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return <WorkflowNode node={step.node} taskId={taskId} current={step.node.nodeId === currentNode} />;
+}
+
+function WorkflowNode({
+  node,
+  taskId,
+  current,
+}: {
+  node: WorkflowNodeView;
+  taskId: string;
+  current: boolean;
+}) {
+  return (
+    <Link
+      className={`workflow-node ${stageToneClass(node.status)}${current ? " workflow-node--current" : ""}`}
+      to={`/tasks/${taskId}/nodes/${encodeURIComponent(node.nodeId)}`}
+    >
+      <strong>{node.nodeId}</strong>
+      <span className="Label">{node.primitive}</span>
+      {node.engine && <span className="muted">{node.engine}</span>}
+      {node.runCount > 1 && <span className="Label">第 {node.runCount} 次</span>}
+      <span style={{ flex: 1 }} />
+      <span className="muted">{fmtDuration(node.durationMs)}</span>
+      <span className={`Label ${stageLabelClass(node.status)}`}>{node.status}</span>
+    </Link>
+  );
+}
+
 function Overview({ detail }: { detail: TaskDetail }) {
-  const rows: Array<[string, React.ReactNode]> = [
+  const rows: Array<[string, ReactNode]> = [
     ["pipeline", `${detail.pipeline.name} (${detail.pipeline.hash.slice(0, 12)})`],
     ["worktree", detail.git.worktreePath],
     [
@@ -609,223 +571,4 @@ function Overview({ detail }: { detail: TaskDetail }) {
       </div>
     </div>
   );
-}
-
-function StageCard({
-  stage,
-  events,
-  onArtifact,
-}: {
-  stage: StageExecution;
-  events: TaskEvent[];
-  onArtifact: (key: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const slice = open
-    ? events.filter((e) => e.seq >= stage.eventRange.from && e.seq <= stage.eventRange.to)
-    : [];
-
-  return (
-    <div className={`stage stage--${stage.status}`}>
-      <button className="stage-head" type="button" onClick={() => setOpen(!open)}>
-        <span className="muted">#{stage.index}</span>
-        <strong>{stage.nodeId}</strong>
-        <span className="Label">{stage.primitive}</span>
-        {stage.loopLabel && <span className="Label">{stage.loopLabel}</span>}
-        {stage.nodeRun > 1 && <span className="Label">第 {stage.nodeRun} 次</span>}
-        {stage.engine && (
-          <span className="muted">
-            {stage.engine}
-            {stage.model ? ` / ${stage.model}` : ""}
-          </span>
-        )}
-        <span style={{ flex: 1 }} />
-        {stage.artifacts.length > 0 && (
-          <span className="muted">{stage.artifacts.length} 交付件</span>
-        )}
-        <span className="muted">{fmtDuration(stage.durationMs)}</span>
-        <span className={`Label ${stageLabelClass(stage.status)}`}>{stage.status}</span>
-      </button>
-      {open && (
-        <div className="stage-body">
-          {stage.error && <p className="error">{stage.error}</p>}
-          {outcomeSummary(stage.outcome) && (
-            <p>
-              <span className="muted">结果 </span>
-              {outcomeSummary(stage.outcome)}
-            </p>
-          )}
-          {stage.artifacts.length > 0 && (
-            <p>
-              <span className="muted">交付件 </span>
-              {stage.artifacts.map((a) => (
-                <button
-                  key={a.key}
-                  className="btn"
-                  type="button"
-                  style={{ marginRight: 6 }}
-                  onClick={() => onArtifact(a.key)}
-                >
-                  {a.key}
-                  {a.ext ? `.${a.ext}` : ""}
-                </button>
-              ))}
-            </p>
-          )}
-          {stage.commits.length > 0 && (
-            <p>
-              <span className="muted">提交 </span>
-              {stage.commits.map((c) => (
-                <code key={c.sha} style={{ marginRight: 6 }}>
-                  {c.sha.slice(0, 8)} {c.message.split("\n")[0]}
-                </code>
-              ))}
-            </p>
-          )}
-          {stage.filesChanged.length > 0 && (
-            <p>
-              <span className="muted">改动文件 </span>
-              {stage.filesChanged.join(", ")}
-            </p>
-          )}
-          {stage.retries.length > 0 && (
-            <p className="error">
-              重试 {stage.retries.map((r) => `#${r.attempt} ${r.error}`).join("; ")}
-            </p>
-          )}
-          <p className="muted">
-            {stage.usage
-              ? `${stage.usage.turns} turns · in ${stage.usage.inputTokens} / out ${stage.usage.outputTokens} · `
-              : ""}
-            {stage.toolUseCount ? `${stage.toolUseCount} 次工具调用 · ` : ""}
-            seq {stage.eventRange.from}–{stage.eventRange.to}
-          </p>
-          <EventTimeline events={slice} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EventTimeline({ events }: { events: TaskEvent[] }) {
-  if (!events.length) return <p className="muted">该区间无事件记录</p>;
-  const chronological = [...events].sort((a, b) => a.seq - b.seq);
-  return (
-    <ul className="timeline">
-      {chronological.map((e) => (
-        <li key={`${e.seq}`}>
-          <span className={`dot ${dotClass(e.type)}`} />
-          <span className="ts">{fmtClock(e.ts)}</span>
-          <strong>{e.type}</strong> <span className="muted">{summarize(e)}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function outcomeSummary(outcome: Record<string, unknown> | undefined): string {
-  if (!outcome) return "";
-  const parts: string[] = [];
-  const push = (cond: boolean, text: string) => {
-    if (cond) parts.push(text);
-  };
-  push(outcome.passed != null, `passed=${String(outcome.passed)}`);
-  push(outcome.commentCount != null, `comments=${String(outcome.commentCount)}`);
-  push(outcome.approved != null, `approved=${String(outcome.approved)}`);
-  push(outcome.rejected === true, "rejected");
-  push(outcome.skipped === true, "skipped");
-  push(typeof outcome.sha === "string", `sha=${String(outcome.sha).slice(0, 8)}`);
-  if (Array.isArray(outcome.filesChanged)) parts.push(`files=${outcome.filesChanged.length}`);
-  if (Array.isArray(outcome.failures) && outcome.failures.length) {
-    parts.push(`failures=${outcome.failures.length}`);
-  }
-  if (typeof outcome.summary === "string" && outcome.summary) parts.push(outcome.summary);
-  return parts.join(" · ");
-}
-
-function prettyJson(text: string): string {
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    return text;
-  }
-}
-
-function fmtDuration(ms: number | undefined): string {
-  if (ms == null) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  return s % 60 ? `${m}m ${s % 60}s` : `${m}m`;
-}
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function fmtClock(iso: string | undefined): string {
-  return iso ? iso.slice(11, 19) : "—";
-}
-
-function stageLabelClass(status: StageExecution["status"]): string {
-  switch (status) {
-    case "completed":
-      return "Label--success";
-    case "failed":
-    case "aborted":
-      return "Label--danger";
-    case "waiting":
-      return "Label--attention";
-    default:
-      return "Label--accent";
-  }
-}
-
-function stateClass(status: Task["status"]): string {
-  switch (status) {
-    case "running":
-    case "delivering":
-      return "State--running";
-    case "waiting_human":
-      return "State--waiting";
-    case "done":
-    case "merged":
-      return "State--done";
-    case "failed":
-    case "cancelled":
-      return "State--failed";
-    default:
-      return "State--queued";
-  }
-}
-
-function dotClass(type: string): string {
-  if (type === "node.completed" || type === "task.completed") return "dot--success";
-  if (type === "task.failed") return "dot--danger";
-  if (type === "node.started") return "dot--accent";
-  if (type === "intervention.required") return "dot--attention";
-  return "";
-}
-
-function summarize(e: TaskEvent): string {
-  try {
-    const p = JSON.parse(e.payload) as Record<string, unknown>;
-    if (e.type === "node.started" || e.type === "node.completed") return String(p.nodeId ?? "");
-    if (e.type === "intervention.required") return String(p.summary ?? p.kind ?? "");
-    if (e.type === "intervention.resolved") {
-      const d = p.decision as { action?: string } | undefined;
-      return String(d?.action ?? "");
-    }
-    if (e.type === "loop.iteration") return `${p.loopId} ${p.iteration}/${p.maxIterations}`;
-    if (e.type === "artifact.created") return String(p.key ?? "");
-    if (e.type === "git.commit") return `${String(p.sha ?? "").slice(0, 8)} ${String(p.message ?? "").split("\n")[0]}`;
-    if (e.type === "log") return String(p.message ?? "");
-    if (e.type === "task.failed") return String(p.error ?? "");
-    return "";
-  } catch {
-    return "";
-  }
 }

@@ -1,4 +1,5 @@
 import { buildTaskDetail as foldTaskDetail, type KernelEvent, type TaskDetail } from "@devtools/shared";
+import { parsePipelineYaml } from "../pipeline/load.js";
 import type { TaskSnapshotView } from "../runtime/kernel-runtime.js";
 
 /**
@@ -16,10 +17,7 @@ export function buildTaskDetail(snapshot: TaskSnapshotView, events: KernelEvent[
       error: task.error,
       createdAt: task.created_at,
       updatedAt: task.updated_at,
-      pipeline: {
-        name: snapshot.pipeline?.name ?? task.pipeline_name,
-        hash: snapshot.pipeline?.hash ?? task.pipeline_hash,
-      },
+      pipeline: pipelineSource(snapshot),
       git: {
         repoPath: task.repo_path,
         worktreePath: task.worktree_path,
@@ -34,4 +32,21 @@ export function buildTaskDetail(snapshot: TaskSnapshotView, events: KernelEvent[
     },
     events,
   );
+}
+
+function pipelineSource(snapshot: TaskSnapshotView): {
+  name: string;
+  hash: string;
+  flow?: ReturnType<typeof parsePipelineYaml>["flow"];
+  nodes?: ReturnType<typeof parsePipelineYaml>["nodes"];
+} {
+  const name = snapshot.pipeline?.name ?? snapshot.task.pipeline_name;
+  const hash = snapshot.pipeline?.hash ?? snapshot.task.pipeline_hash;
+  if (!snapshot.pipeline?.rawYaml) return { name, hash };
+  try {
+    const loaded = parsePipelineYaml(snapshot.pipeline.rawYaml);
+    return { name, hash, flow: loaded.flow, nodes: loaded.nodes };
+  } catch {
+    return { name, hash };
+  }
 }

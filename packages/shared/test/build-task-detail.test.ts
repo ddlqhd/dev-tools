@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   buildTaskDetail,
   kernelStatusFromPlatform,
+  mergeRemoteTaskDetail,
   parseStoredKernelEvents,
   type KernelEvent,
+  type TaskDetail,
   type TaskDetailSource,
 } from "../src/index.js";
 
@@ -51,6 +53,10 @@ test("buildTaskDetail: folds node.started/completed into stages", () => {
   assert.equal(detail.stages[1]!.status, "completed");
   assert.equal(detail.status, "completed");
   assert.ok((detail.durationMs ?? 0) >= 0);
+  assert.deepEqual(
+    detail.workflow.steps.map((s) => (s.kind === "node" ? s.node.nodeId : s.loop.loopId)),
+    ["plan", "code"],
+  );
 });
 
 test("buildTaskDetail: loop re-entry yields a second stage for the same node", () => {
@@ -104,4 +110,96 @@ test("parseStoredKernelEvents + completed platform task still yields stages", ()
   assert.equal(detail.stages[0]!.status, "completed");
   assert.equal(kernelStatusFromPlatform("done"), "completed");
   assert.equal(kernelStatusFromPlatform("cancelled"), "aborted");
+});
+
+test("buildTaskDetail: empty log + flow still yields a pending workflow", () => {
+  const detail = buildTaskDetail(
+    source({
+      status: "running",
+      pipeline: {
+        name: "p",
+        hash: "h",
+        flow: [{ kind: "node", nodeId: "plan" }],
+        nodes: { plan: { type: "agent", engine: "planner" } },
+      },
+    }),
+    [],
+  );
+  assert.equal(detail.stages.length, 0);
+  assert.equal(detail.workflow.steps.length, 1);
+  assert.equal(detail.workflow.steps[0]!.kind, "node");
+  if (detail.workflow.steps[0]!.kind !== "node") throw new Error("expected node");
+  assert.equal(detail.workflow.steps[0].node.status, "pending");
+});
+
+function stubDetail(over: Partial<TaskDetail> & Pick<TaskDetail, "workflow" | "stages">): TaskDetail {
+  return {
+    taskId: "k1",
+    requirement: "req",
+    status: "running",
+    currentNode: null,
+    error: null,
+    createdAt: "2026-08-23T00:00:00.000Z",
+    updatedAt: "2026-08-23T00:00:00.000Z",
+    pipeline: { name: "p", hash: "" },
+    git: { repoPath: "", worktreePath: "", branch: "", baseCommit: "" },
+    artifacts: [],
+    commits: [],
+    interventions: [],
+    usage: { inputTokens: 0, outputTokens: 0, turns: 0 },
+    eventCount: 0,
+    lastSeq: 0,
+    ...over,
+  };
+}
+
+test("mergeRemoteTaskDetail: keeps a remote graph even when stages are empty", () => {
+  const remote = stubDetail({
+    stages: [],
+    workflow: {
+      name: "p",
+      steps: [{ kind: "node", node: { nodeId: "plan", primitive: "agent", status: "pending", runCount: 0 } }],
+    },
+  });
+  const fallback = stubDetail({
+    stages: [],
+    workflow: { name: "p", steps: [] },
+  });
+  assert.equal(mergeRemoteTaskDetail(remote, fallback), remote);
+});
+
+test("mergeRemoteTaskDetail: attaches fallback workflow when remote omitted it", () => {
+  const fallback = stubDetail({
+    stages: [],
+    workflow: {
+      name: "p",
+      steps: [{ kind: "node", node: { nodeId: "plan", primitive: "agent", status: "completed", runCount: 1 } }],
+    },
+  });
+  const remote = stubDetail({
+    stages: [
+      {
+        index: 1,
+        nodeId: "plan",
+        primitive: "agent",
+        loopStack: [],
+        nodeRun: 1,
+        startedAt: "2026-08-23T00:00:00.000Z",
+        status: "completed",
+        artifacts: [],
+        commits: [],
+        interventions: [],
+        toolUseCount: 0,
+        filesChanged: [],
+        retries: [],
+        eventRange: { from: 1, to: 2 },
+      },
+    ],
+    workflow: { name: "p", steps: [] },
+  });
+  const merged = mergeRemoteTaskDetail(remote, fallback);
+  assert.equal(merged.stages.length, 1);
+  assert.equal(merged.workflow.steps[0]!.kind, "node");
+  if (merged.workflow.steps[0]!.kind !== "node") throw new Error("expected node");
+  assert.equal(merged.workflow.steps[0].node.nodeId, "plan");
 });

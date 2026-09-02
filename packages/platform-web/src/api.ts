@@ -1,3 +1,16 @@
+import type { TaskDetail as SharedTaskDetail, WorkflowView } from "@devtools/shared";
+
+export type {
+  ArtifactFile,
+  InterventionRecord,
+  StageExecution,
+  WorkflowLoopView,
+  WorkflowNodeStatus,
+  WorkflowNodeView,
+  WorkflowStepView,
+  WorkflowView,
+} from "@devtools/shared";
+
 export type TaskStatus =
   | "queued"
   | "preparing"
@@ -95,79 +108,8 @@ export type KernelTaskSnapshot = {
   pendingIntervention?: { requestId?: string; kind?: string; summary?: string } | null;
 };
 
-/** Mirrors the kernel's TaskDetail (@devtools/shared) over the platform proxy. */
-export interface StageExecution {
-  index: number;
-  nodeId: string;
-  primitive: string;
-  engine?: string;
-  model?: string;
-  loopLabel?: string;
-  nodeRun: number;
-  startedAt: string;
-  endedAt?: string;
-  durationMs?: number;
-  status: "running" | "waiting" | "completed" | "failed" | "aborted";
-  error?: string;
-  outcome?: Record<string, unknown>;
-  artifacts: Array<{ key: string; ext?: string }>;
-  commits: Array<{ sha: string; message: string; at: string }>;
-  interventions: InterventionRecord[];
-  usage?: { inputTokens: number; outputTokens: number; costUsd?: number; turns: number };
-  toolUseCount: number;
-  filesChanged: string[];
-  retries: Array<{ attempt: number; error: string }>;
-  eventRange: { from: number; to: number };
-}
-
-export interface InterventionRecord {
-  requestId: string;
-  nodeId: string;
-  kind: string;
-  summary: string;
-  requestedAt: string;
-  resolvedAt?: string;
-  waitedMs?: number;
-  decision?: { action: string; note?: string };
-}
-
-export interface ArtifactFile {
-  key: string;
-  ext: string;
-  size: number;
-  mtime: string;
-  producedByNodeId?: string;
-  producedAt?: string;
-}
-
-export interface TaskDetail {
-  taskId: string;
-  requirement: string;
-  status: string;
-  currentNode: string | null;
-  error: string | null;
-  createdAt: string;
-  updatedAt: string;
-  startedAt?: string;
-  endedAt?: string;
-  durationMs?: number;
-  pipeline: { name: string; hash: string };
-  git: {
-    repoPath: string;
-    worktreePath: string;
-    branch: string;
-    baseCommit: string;
-    head?: string;
-    dirty?: boolean;
-  };
-  stages: StageExecution[];
-  artifacts: ArtifactFile[];
-  commits: Array<{ sha: string; message: string; at: string; nodeId?: string }>;
-  interventions: InterventionRecord[];
-  usage: { inputTokens: number; outputTokens: number; costUsd?: number; turns: number };
-  eventCount: number;
-  lastSeq: number;
-}
+/** Wire payload: older kernels omit `workflow`. */
+export type TaskDetail = Omit<SharedTaskDetail, "workflow"> & { workflow?: WorkflowView };
 
 /** PLATFORM_TOKEN for console: localStorage, or Vite env at build time. */
 export function getPlatformToken(): string | undefined {

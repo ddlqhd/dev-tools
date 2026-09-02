@@ -2,6 +2,8 @@ export * from "./types.js";
 export * from "./events.js";
 export * from "./task-detail.js";
 export * from "./build-task-detail.js";
+export * from "./build-workflow.js";
+export * from "./fold-node-events.js";
 export * from "./review.js";
 export * from "./verify.js";
 export * from "./pipeline.js";

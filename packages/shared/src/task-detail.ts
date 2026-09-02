@@ -1,4 +1,5 @@
 import type { LoopStackEntry } from "./events.js";
+import type { FlowStep, NodeSpec } from "./pipeline.js";
 import type { InterventionDecision, InterventionKind, InterventionRequest } from "./types.js";
 
 /** An artifact file on disk under `.codeloop/tasks/<id>/artifacts/`. */
@@ -52,6 +53,36 @@ export interface InterventionRecord {
 
 export type StageStatus = "running" | "waiting" | "completed" | "failed" | "aborted";
 
+export type WorkflowNodeStatus = "pending" | StageStatus;
+
+/** One pipeline node with the latest execution overlaid. */
+export interface WorkflowNodeView {
+  nodeId: string;
+  primitive: string;
+  engine?: string;
+  status: WorkflowNodeStatus;
+  runCount: number;
+  latestStageIndex?: number;
+  durationMs?: number;
+}
+
+export interface WorkflowLoopView {
+  loopId: string;
+  maxIterations: number;
+  until: string;
+  iteration?: number;
+  body: WorkflowNodeView[];
+}
+
+export type WorkflowStepView =
+  | { kind: "node"; node: WorkflowNodeView }
+  | { kind: "loop"; loop: WorkflowLoopView };
+
+export interface WorkflowView {
+  name: string;
+  steps: WorkflowStepView[];
+}
+
 /** One node execution. A node re-entered by a loop yields one stage per pass. */
 export interface StageExecution {
   /** 1-based position in execution order. */
@@ -94,6 +125,7 @@ export interface TaskDetail {
   endedAt?: string;
   durationMs?: number;
   pipeline: { name: string; hash: string };
+  workflow: WorkflowView;
   git: {
     repoPath: string;
     worktreePath: string;
@@ -122,7 +154,12 @@ export interface TaskDetailSource {
   error: string | null;
   createdAt: string;
   updatedAt: string;
-  pipeline: { name: string; hash: string };
+  pipeline: {
+    name: string;
+    hash: string;
+    flow?: FlowStep[];
+    nodes?: Record<string, NodeSpec>;
+  };
   git: TaskDetail["git"];
   artifacts?: ArtifactFile[];
   pendingIntervention?: InterventionRequest | null;

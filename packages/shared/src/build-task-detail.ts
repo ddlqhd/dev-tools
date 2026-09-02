@@ -10,6 +10,7 @@ import type {
   NodeStartedPayload,
 } from "./events.js";
 import type { InterventionRequiredPayload, InterventionResolvedPayload } from "./events.js";
+import { buildWorkflowView } from "./build-workflow.js";
 import type {
   ArtifactFile,
   InterventionRecord,
@@ -19,6 +20,7 @@ import type {
   TaskDetail,
   TaskDetailSource,
   UsageTotals,
+  WorkflowView,
 } from "./task-detail.js";
 
 /**
@@ -256,7 +258,13 @@ export function buildTaskDetail(source: TaskDetailSource, events: KernelEvent[])
     durationMs: startedAt
       ? Math.max(0, Date.parse(endedAt ?? source.updatedAt) - Date.parse(startedAt))
       : undefined,
-    pipeline: source.pipeline,
+    pipeline: { name: source.pipeline.name, hash: source.pipeline.hash },
+    workflow: buildWorkflowView(
+      source.pipeline.name,
+      stages,
+      source.pipeline.flow,
+      source.pipeline.nodes,
+    ),
     git: source.git,
     stages,
     artifacts,
@@ -267,6 +275,19 @@ export function buildTaskDetail(source: TaskDetailSource, events: KernelEvent[])
     eventCount: events.length,
     lastSeq,
   };
+}
+
+/**
+ * Keep a remote fold when it already has a graph or stages.
+ * Rebuild only when the payload omitted both (old kernel / empty run).
+ */
+export function mergeRemoteTaskDetail<T extends { workflow?: WorkflowView; stages: unknown[] }>(
+  remote: T,
+  fallback: T,
+): T {
+  if (remote.workflow && remote.workflow.steps.length > 0) return remote;
+  if (remote.stages.length > 0) return { ...remote, workflow: fallback.workflow };
+  return fallback;
 }
 
 /** Parse platform-stored event rows (`payload` is JSON text) into kernel events. */

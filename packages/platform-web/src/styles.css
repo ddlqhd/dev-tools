@@ -636,6 +636,122 @@ label {
   margin: 8px 0;
 }
 
+/* Pipeline workflow */
+.workflow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workflow-loop {
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--canvas-subtle);
+}
+
+.workflow-loop-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.workflow-loop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-muted);
+}
+
+.workflow-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--canvas-default);
+}
+
+.workflow-node:hover {
+  background: var(--canvas-subtle);
+}
+
+.workflow-node--current {
+  border-color: var(--accent-fg);
+}
+
+.workflow-node--failed {
+  border-color: color-mix(in srgb, var(--danger-fg) 50%, transparent);
+}
+
+.workflow-node--waiting {
+  border-color: color-mix(in srgb, var(--attention-fg) 50%, transparent);
+}
+
+.workflow-node--running {
+  border-color: color-mix(in srgb, var(--accent-fg) 50%, transparent);
+}
+
+.workflow-node--pending {
+  opacity: 0.7;
+}
+
+.node-stream {
+  margin-top: 8px;
+}
+
+.stream-block {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: var(--canvas-inset);
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.stream-block--thinking {
+  color: var(--fg-muted);
+}
+
+.stream-kicker {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stream-line {
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.stream-line--ok {
+  color: var(--success-fg);
+}
+
+.stream-line--bad {
+  color: var(--danger-fg);
+}
+
+.stream-line--warn {
+  color: var(--attention-fg);
+}
+
 /* Definition grid */
 .kv-grid {
   margin: 0;
