@@ -110,6 +110,7 @@ test("parseStoredKernelEvents + completed platform task still yields stages", ()
   assert.equal(detail.stages[0]!.status, "completed");
   assert.equal(kernelStatusFromPlatform("done"), "completed");
   assert.equal(kernelStatusFromPlatform("cancelled"), "aborted");
+  assert.equal(kernelStatusFromPlatform("paused"), "suspended");
 });
 
 test("buildTaskDetail: empty log + flow still yields a pending workflow", () => {

@@ -4,6 +4,7 @@ export type PlatformTaskStatus =
   | "queued"
   | "preparing"
   | "running"
+  | "paused"
   | "waiting_human"
   | "delivering"
   | "done"

@@ -457,7 +457,7 @@ label {
 
 .board {
   display: grid;
-  grid-template-columns: repeat(5, minmax(180px, 1fr));
+  grid-template-columns: repeat(6, minmax(180px, 1fr));
   gap: 12px;
   align-items: start;
 }
@@ -489,7 +489,9 @@ label {
 }
 
 .board-card {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
   background: var(--canvas-default);
   border: 1px solid var(--border-default);
   border-radius: 6px;
@@ -503,6 +505,85 @@ label {
   border-color: var(--accent-fg);
   box-shadow: var(--shadow-medium);
   text-decoration: none;
+}
+
+.board-card-main {
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.board-card-main:hover {
+  text-decoration: none;
+}
+
+.board-card-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.board-card-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.board-card-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.board-card-menu > summary:hover {
+  background: var(--btn-hover-bg);
+  color: var(--fg-default);
+}
+
+.board-card-menu-panel {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 20;
+  min-width: 96px;
+  padding: 4px;
+  margin-top: 2px;
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  box-shadow: var(--shadow-medium);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.board-card-menu-panel button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg-default);
+  cursor: pointer;
+}
+
+.board-card-menu-panel button:hover:not(:disabled) {
+  background: var(--btn-hover-bg);
+}
+
+.board-card-menu-panel button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .board-card .title {
@@ -519,6 +600,12 @@ label {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+.board-card .meta .State {
+  font-size: 11px;
+  padding: 0 8px;
+  line-height: 18px;
 }
 
 .board-card-error {

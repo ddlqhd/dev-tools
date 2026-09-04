@@ -22,6 +22,7 @@ const CANCELABLE: ReadonlySet<PlatformTaskStatus> = new Set([
   "queued",
   "preparing",
   "running",
+  "paused",
   "waiting_human",
   "delivering",
 ]);
@@ -29,6 +30,7 @@ const CANCELABLE: ReadonlySet<PlatformTaskStatus> = new Set([
 const ABORTABLE: ReadonlySet<PlatformTaskStatus> = new Set([
   "preparing",
   "running",
+  "paused",
   "waiting_human",
   "delivering",
 ]);
@@ -36,6 +38,33 @@ const ABORTABLE: ReadonlySet<PlatformTaskStatus> = new Set([
 const RETRYABLE: ReadonlySet<PlatformTaskStatus> = new Set(["failed", "cancelled"]);
 
 const ACTIVE_PLATFORM: ReadonlySet<PlatformTaskStatus> = new Set(["running", "waiting_human"]);
+
+/** Operator pause reasons from kernel `task.suspended` (e.g. `"paused"`, `"paused by …"`). */
+export function isOperatorPauseReason(reason: string): boolean {
+  return reason === "paused" || reason.startsWith("paused ");
+}
+
+export function platformStatusAfterSuspended(reason: string): "paused" | "waiting_human" {
+  return isOperatorPauseReason(reason) ? "paused" : "waiting_human";
+}
+
+/** Infer action context for board cards without a live kernel snapshot. */
+export function boardActionContext(task: {
+  status: PlatformTaskStatus;
+  instance_id: string | null;
+  kernel_task_id: string | null;
+}): TaskActionContext {
+  const bound = !!(task.instance_id && task.kernel_task_id);
+  let kernelStatus: string | null = null;
+  if (task.status === "paused") kernelStatus = "suspended";
+  else if (task.status === "running" || task.status === "preparing") kernelStatus = "running";
+  return {
+    status: task.status,
+    bound,
+    kernelStatus,
+    hasPendingIntervention: task.status === "waiting_human",
+  };
+}
 
 export function taskActionsEnabled(
   ctx: TaskActionContext,
@@ -68,9 +97,10 @@ export function taskActionsEnabled(
   }
 
   if (
-    bound &&
-    !hasPendingIntervention &&
-    (kernelStatus === "suspended" || kernelStatus === "failed")
+    (bound &&
+      !hasPendingIntervention &&
+      (kernelStatus === "suspended" || kernelStatus === "failed")) ||
+    (status === "paused" && bound)
   ) {
     enabled.resume = true;
   }

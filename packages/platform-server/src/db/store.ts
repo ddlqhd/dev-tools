@@ -423,14 +423,14 @@ export class PlatformStore {
       .prepare(
         `SELECT COUNT(*) AS c FROM tasks
          WHERE parent_task_id = ? AND source = 'ci-fix'
-         AND status IN ('queued','preparing','running','waiting_human','delivering')`,
+         AND status IN ('queued','preparing','running','paused','waiting_human','delivering')`,
       )
       .get(parentTaskId) as { c: number };
     return row.c > 0;
   }
 
   countActiveByRepo(repoId: string): number {
-    // `waiting_human` deliberately excluded: tasks parked on an approval must
+    // `waiting_human` / `paused` deliberately excluded: parked tasks must
     // not block fresh work from being scheduled for the same repo.
     const row = this.db
       .prepare(
@@ -515,7 +515,7 @@ export class PlatformStore {
     const row = this.db
       .prepare(
         `SELECT COUNT(*) AS c FROM tasks WHERE instance_id = ?
-         AND status IN ('preparing','running','waiting_human','delivering')`,
+         AND status IN ('preparing','running','paused','waiting_human','delivering')`,
       )
       .get(instanceId) as { c: number };
     return row.c;

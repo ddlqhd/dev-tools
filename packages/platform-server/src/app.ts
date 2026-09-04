@@ -480,7 +480,7 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
     }
   }
   for (const task of store.listTasks()) {
-    if (["preparing", "running", "waiting_human", "delivering"].includes(task.status)) {
+    if (["preparing", "running", "waiting_human", "paused", "delivering"].includes(task.status)) {
       store.updateTask(task.id, {
         status: "failed",
         error: task.error ?? "platform restarted while task was active",
