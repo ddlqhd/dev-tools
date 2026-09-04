@@ -419,6 +419,37 @@ label {
   color: var(--fg-default);
 }
 
+/* Board toolbar + create-task modal */
+.board-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(1, 4, 9, 0.6);
+}
+
+.modal-panel {
+  width: 100%;
+  max-width: 640px;
+  max-height: min(90vh, 720px);
+  overflow: auto;
+  margin-bottom: 0;
+  box-shadow: var(--shadow-medium);
+}
+
+.modal-panel .Box-header {
+  justify-content: space-between;
+}
+
 /* Board (GitHub Projects) */
 .board-time-filter {
   margin: 16px 0 12px;

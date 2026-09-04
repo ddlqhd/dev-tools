@@ -31,12 +31,18 @@ export function BoardPage() {
   const [timeMode, setTimeMode] = useState<TimeFilterMode>("all");
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({
     repoId: "",
     title: "",
     requirement: "",
     pipeline: "",
   });
+
+  const closeCreate = () => {
+    setCreateOpen(false);
+    setError(null);
+  };
 
   const reload = async () => {
     const [t, r] = await Promise.all([api.listTasks(), api.listRepos()]);
@@ -72,6 +78,10 @@ export function BoardPage() {
   }, []);
 
   useEffect(() => {
+    if (!createOpen) {
+      setPipelinesLoading(false);
+      return;
+    }
     if (!form.repoId) {
       setPipelines([]);
       setForm((f) => ({ ...f, pipeline: "" }));
@@ -102,7 +112,24 @@ export function BoardPage() {
     return () => {
       cancelled = true;
     };
-  }, [form.repoId]);
+  }, [createOpen, form.repoId]);
+
+  useEffect(() => {
+    if (!createOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setCreateOpen(false);
+        setError(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [createOpen]);
 
   const repoName = useMemo(() => {
     const m = new Map(repos.map((r) => [r.id, r.full_name]));
@@ -137,6 +164,7 @@ export function BoardPage() {
         pipeline: form.pipeline || undefined,
       });
       setForm((f) => ({ ...f, title: "", requirement: "" }));
+      setCreateOpen(false);
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -145,69 +173,19 @@ export function BoardPage() {
 
   return (
     <>
-      <div className="Box">
-        <div className="Box-header">
-          <h2>手工创建任务</h2>
-        </div>
-        <div className="Box-body">
-          <div className="row" style={{ marginBottom: 12 }}>
-          <label>
-            仓库
-            <select
-              value={form.repoId}
-              onChange={(e) => setForm({ ...form, repoId: e.target.value })}
-            >
-              {repos.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.full_name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Pipeline
-            <select
-              value={form.pipeline}
-              onChange={(e) => setForm({ ...form, pipeline: e.target.value })}
-              disabled={pipelinesLoading || !form.repoId || pipelineOptions.length === 0}
-            >
-              {pipelineOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            标题
-            <input
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-            />
-          </label>
-        </div>
-          <label style={{ marginBottom: 12 }}>
-            需求
-            <textarea
-              value={form.requirement}
-              onChange={(e) => setForm({ ...form, requirement: e.target.value })}
-              placeholder="描述要实现的改动…"
-            />
-          </label>
-          <button
-            className="btn btn-primary"
-            type="button"
-            onClick={() => void create()}
-            disabled={!form.repoId || !form.requirement || !form.pipeline || pipelinesLoading}
-          >
-            入队
-          </button>
-          {pipelinesLoading && <p className="muted">加载 Pipeline…</p>}
-          {error && <p className="error">{error}</p>}
-          {!repos.length && (
-            <p className="muted">还没有仓库，先去「仓库」页接入本地或 GitHub 仓库。</p>
-          )}
-        </div>
+      {!createOpen && error && <p className="error">{error}</p>}
+
+      <div className="board-toolbar">
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={() => {
+            setError(null);
+            setCreateOpen(true);
+          }}
+        >
+          新建任务
+        </button>
       </div>
 
       <div className="board-time-filter row">
@@ -274,6 +252,84 @@ export function BoardPage() {
           );
         })}
       </div>
+
+      {createOpen && (
+        <div className="modal-backdrop" onClick={closeCreate}>
+          <div
+            className="modal-panel Box"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-task-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="Box-header">
+              <h2 id="create-task-title">新建任务</h2>
+              <button className="btn" type="button" onClick={closeCreate}>
+                取消
+              </button>
+            </div>
+            <div className="Box-body">
+              <div className="row" style={{ marginBottom: 12 }}>
+                <label>
+                  仓库
+                  <select
+                    value={form.repoId}
+                    onChange={(e) => setForm({ ...form, repoId: e.target.value })}
+                  >
+                    {repos.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.full_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Pipeline
+                  <select
+                    value={form.pipeline}
+                    onChange={(e) => setForm({ ...form, pipeline: e.target.value })}
+                    disabled={pipelinesLoading || !form.repoId || pipelineOptions.length === 0}
+                  >
+                    {pipelineOptions.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  标题
+                  <input
+                    value={form.title}
+                    onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  />
+                </label>
+              </div>
+              <label style={{ marginBottom: 12 }}>
+                需求
+                <textarea
+                  value={form.requirement}
+                  onChange={(e) => setForm({ ...form, requirement: e.target.value })}
+                  placeholder="描述要实现的改动…"
+                />
+              </label>
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={() => void create()}
+                disabled={!form.repoId || !form.requirement || !form.pipeline || pipelinesLoading}
+              >
+                入队
+              </button>
+              {pipelinesLoading && <p className="muted">加载 Pipeline…</p>}
+              {error && <p className="error">{error}</p>}
+              {!repos.length && (
+                <p className="muted">还没有仓库，先去「仓库」页接入本地或 GitHub 仓库。</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
