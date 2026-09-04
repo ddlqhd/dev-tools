@@ -24,7 +24,7 @@ export interface ServeHandle {
   close(): Promise<void>;
 }
 
-interface LockFile {
+export interface LockFile {
   pid: number;
   host: string;
   port: number;

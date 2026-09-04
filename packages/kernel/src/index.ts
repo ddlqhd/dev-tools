@@ -24,6 +24,6 @@ export type {
   ApplyInterventionResult,
 } from "./runtime/kernel-runtime.js";
 export { startKernelServer, readKernelLock } from "./server/http-server.js";
-export type { ServeOptions, ServeHandle } from "./server/http-server.js";
+export type { ServeOptions, ServeHandle, LockFile } from "./server/http-server.js";
 export { syncSkills, SKILL_TARGET_DIRS } from "./skills.js";
 export type { SyncSkillsOptions, SyncSkillsResult } from "./skills.js";

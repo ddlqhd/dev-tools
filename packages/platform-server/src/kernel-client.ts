@@ -15,7 +15,10 @@ export class KernelClient {
 
   async health(): Promise<boolean> {
     try {
-      const res = await fetch(`${this.endpoint}/health`, { headers: this.headers() });
+      const res = await fetch(`${this.endpoint}/health`, {
+        headers: this.headers(),
+        signal: AbortSignal.timeout(800),
+      });
       return res.ok;
     } catch {
       return false;

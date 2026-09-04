@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { issueToRequirement, type PlatformIssue } from "@devtools/shared";
+import { acquireKernelInstance } from "./acquire-instance.js";
 import type { PlatformConfig } from "./config.js";
 import type { PlatformStore, RepoRow, TaskRow } from "./db/store.js";
 import { GitHubAdapter } from "./github/adapter.js";
@@ -178,16 +179,20 @@ export class Scheduler {
     if (!repo) return;
 
     if (this.store.countActiveByRepo(repo.id) >= repo.max_concurrency) return;
-    if (this.store.countActiveInstances() >= this.config.scheduler.globalMaxInstances) {
-      // may still reuse idle instance for this repo
-      const idle = this.store.findIdleInstance(repo.id);
-      if (!idle) return;
+    // One kernel process per repo. Reusing it does not consume another
+    // globalMaxInstances slot; only a fresh spawn does.
+    const reusable = this.store.listReusableInstances(repo.id);
+    if (
+      reusable.length === 0 &&
+      this.store.countActiveInstances() >= this.config.scheduler.globalMaxInstances
+    ) {
+      return;
     }
 
     this.store.updateTask(task.id, { status: "preparing" });
     this.hub({ type: "task.updated", payload: this.store.getTask(task.id) });
 
-    let instance: ReturnType<PlatformStore["getInstance"]>;
+    let instance: ReturnType<PlatformStore["getInstance"]> | undefined;
     try {
       const clonePath = await this.repos.ensureRepo(
         repo.full_name,
@@ -198,39 +203,15 @@ export class Scheduler {
         this.store.updateRepo(repo.id, { clone_path: clonePath });
       }
 
-      instance = this.store.findIdleInstance(repo.id);
-      let handle = instance ? this.live.get(instance.id) : undefined;
-
-      if (!instance || !handle || (await this.launcher.probe(handle)) === "dead") {
-        if (handle) {
-          await this.launcher.terminate(handle).catch(() => undefined);
-          if (instance) this.store.updateInstance(instance.id, { status: "dead" });
-        }
-        handle = await this.launcher.launch({
-          repoPath: clonePath,
-          token: randomUUID().replace(/-/g, "").slice(0, 24),
-        });
-        const now = new Date().toISOString();
-        this.store.insertInstance({
-          id: handle.id,
-          launcher: "local-process",
-          repo_id: repo.id,
-          endpoint: handle.endpoint,
-          token: handle.token ?? null,
-          pid: handle.pid,
-          status: "busy",
-          started_at: now,
-          last_seen_at: now,
-        });
-        this.live.set(handle.id, handle);
-        instance = this.store.getInstance(handle.id)!;
-        this.sync.watchInstance(instance.id);
-      } else {
-        this.store.updateInstance(instance.id, {
-          status: "busy",
-          last_seen_at: new Date().toISOString(),
-        });
-      }
+      instance = await acquireKernelInstance({
+        store: this.store,
+        repoId: repo.id,
+        clonePath,
+        live: this.live,
+        launcher: this.launcher,
+        watch: (id) => this.sync.watchInstance(id),
+        globalMaxInstances: this.config.scheduler.globalMaxInstances,
+      });
 
       const client = new KernelClient(instance.endpoint, instance.token);
       const created = await client.createTask({

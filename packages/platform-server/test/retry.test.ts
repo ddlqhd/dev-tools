@@ -163,3 +163,48 @@ test("waiting_human does not consume repo concurrency slots; due retries are deq
     store.close();
   }
 });
+
+test("releaseInstance stays busy while another task is still bound", async () => {
+  tmp = await mkdtemp(join(tmpdir(), "codeloop-release-"));
+  const store = new PlatformStore(tmp);
+  const sync = makeSync(store, makeConfig());
+  try {
+    const now = new Date().toISOString();
+    store.insertRepo({
+      id: "r1",
+      platform: "github",
+      full_name: "o/r",
+      clone_path: "/tmp/x",
+      trigger_label: "ai-dev",
+      max_concurrency: 10,
+      loop_config: null,
+      github_token: null,
+      default_branch: "main",
+      created_at: now,
+      updated_at: now,
+    });
+    store.insertInstance({
+      id: "inst-1",
+      launcher: "local-process",
+      repo_id: "r1",
+      endpoint: "http://127.0.0.1:1",
+      token: null,
+      pid: 1,
+      status: "busy",
+      started_at: now,
+      last_seen_at: now,
+    });
+    store.insertTask(taskRow("keep", { instance_id: "inst-1", status: "running" }));
+    store.insertTask(taskRow("done", { instance_id: "inst-1", status: "done" }));
+
+    sync.releaseInstance("inst-1");
+    assert.equal(store.getInstance("inst-1")!.status, "busy");
+
+    store.updateTask("keep", { status: "done" });
+    sync.releaseInstance("inst-1");
+    assert.equal(store.getInstance("inst-1")!.status, "idle");
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+    store.close();
+  }
+});

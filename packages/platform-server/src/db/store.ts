@@ -497,13 +497,28 @@ export class PlatformStore {
       .all() as unknown as InstanceRow[];
   }
 
-  findIdleInstance(repoId: string): InstanceRow | undefined {
+  /**
+   * Live kernels for this repo. Busy first so a stale idle row cannot hide
+   * the process that still holds `.codeloop/kernel.lock`.
+   */
+  listReusableInstances(repoId: string): InstanceRow[] {
     return this.db
       .prepare(
-        `SELECT * FROM instances WHERE repo_id = ? AND status = 'idle'
-         ORDER BY last_seen_at DESC LIMIT 1`,
+        `SELECT * FROM instances WHERE repo_id = ? AND status IN ('idle','busy','starting')
+         ORDER BY CASE status WHEN 'busy' THEN 0 WHEN 'starting' THEN 1 ELSE 2 END,
+                  last_seen_at DESC`,
       )
-      .get(repoId) as unknown as InstanceRow | undefined;
+      .all(repoId) as unknown as InstanceRow[];
+  }
+
+  countActiveTasksOnInstance(instanceId: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM tasks WHERE instance_id = ?
+         AND status IN ('preparing','running','waiting_human','delivering')`,
+      )
+      .get(instanceId) as { c: number };
+    return row.c;
   }
 
   // --- events ---

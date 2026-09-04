@@ -112,11 +112,12 @@ export class EventSync {
     });
   }
 
-  /** Mark kernel instance idle so the scheduler can reuse it. */
+  /** Mark kernel instance idle when no other task is still bound to it. */
   releaseInstance(instanceId: string | null | undefined): void {
     if (!instanceId) return;
     const inst = this.store.getInstance(instanceId);
     if (!inst) return;
+    if (this.store.countActiveTasksOnInstance(instanceId) > 0) return;
     if (inst.status === "busy" || inst.status === "starting") {
       this.store.updateInstance(instanceId, {
         status: "idle",
