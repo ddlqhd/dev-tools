@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import type { KernelEvent, ProgressReport } from "@devtools/shared";
+import { platformStatusAfterSuspended, type KernelEvent, type ProgressReport } from "@devtools/shared";
 import type { PlatformConfig } from "./config.js";
 import type { PlatformStore } from "./db/store.js";
 import { GitHubAdapter } from "./github/adapter.js";
@@ -36,7 +36,7 @@ export class EventSync {
       for (const task of this.store.listTasks()) {
         if (
           task.instance_id === instanceId &&
-          ["preparing", "running", "waiting_human", "delivering"].includes(task.status)
+          ["preparing", "running", "waiting_human", "paused", "delivering"].includes(task.status)
         ) {
           void this.catchUp(instanceId, task.id);
         }
@@ -151,7 +151,7 @@ export class EventSync {
 
     if (event.type === "node.started") {
       this.store.updateTask(task.id, { current_node: String(payload.nodeId ?? "") });
-      if (task.status === "waiting_human") {
+      if (task.status === "waiting_human" || task.status === "paused") {
         this.store.updateTask(task.id, { status: "running" });
       }
     }
@@ -176,7 +176,9 @@ export class EventSync {
     }
 
     if (event.type === "task.suspended") {
-      this.store.updateTask(task.id, { status: "waiting_human" });
+      this.store.updateTask(task.id, {
+        status: platformStatusAfterSuspended(String(payload.reason ?? "")),
+      });
     }
 
     if (event.type === "task.completed") {

@@ -323,6 +323,7 @@ export function kernelStatusFromPlatform(status: string): string {
     case "cancelled":
       return "aborted";
     case "waiting_human":
+    case "paused":
       return "suspended";
     case "queued":
     case "preparing":

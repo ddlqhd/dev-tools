@@ -16,6 +16,7 @@ export type TaskStatus =
   | "queued"
   | "preparing"
   | "running"
+  | "paused"
   | "waiting_human"
   | "delivering"
   | "done"

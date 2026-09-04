@@ -49,6 +49,7 @@ export function stateClass(status: Task["status"]): string {
     case "delivering":
       return "State--running";
     case "waiting_human":
+    case "paused":
       return "State--waiting";
     case "done":
     case "merged":

@@ -1,13 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Link } from "react-router-dom";
+import { boardActionContext, taskActionsEnabled } from "@devtools/shared";
 import { api, connectHub, type Repo, type Task, type TaskStatus } from "../api";
+import { stateClass } from "../format";
 
 const COLUMNS: Array<{ key: TaskStatus | "active"; title: string; match: TaskStatus[] }> = [
   { key: "queued", title: "排队", match: ["queued", "preparing"] },
   { key: "running", title: "运行中", match: ["running", "delivering"] },
+  { key: "paused", title: "暂停", match: ["paused"] },
   { key: "waiting_human", title: "等人", match: ["waiting_human"] },
   { key: "done", title: "完成", match: ["done", "merged"] },
   { key: "failed", title: "失败", match: ["failed", "cancelled"] },
+];
+
+const MENU_ACTIONS = [
+  { key: "pause" as const, label: "暂停", run: (id: string) => api.pause(id) },
+  { key: "resume" as const, label: "继续", run: (id: string) => api.resume(id) },
+  { key: "abort" as const, label: "中止", run: (id: string) => api.abort(id) },
+  { key: "cancel" as const, label: "取消", run: (id: string) => api.cancel(id) },
+  { key: "retry" as const, label: "重试", run: (id: string) => api.retry(id) },
 ];
 
 export function BoardPage() {
@@ -113,6 +124,24 @@ export function BoardPage() {
     }
   };
 
+  const runCardAction = async (
+    e: MouseEvent<HTMLButtonElement>,
+    taskId: string,
+    run: (id: string) => Promise<unknown>,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const menu = e.currentTarget.closest("details") as HTMLDetailsElement | null;
+    if (menu) menu.open = false;
+    setError(null);
+    try {
+      await run(taskId);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <>
       <div className="Box">
@@ -189,22 +218,47 @@ export function BoardPage() {
                 <span>{col.title}</span>
                 <span className="Counter">{items.length}</span>
               </h3>
-              {items.map((t) => (
-                <Link key={t.id} className="board-card" to={`/tasks/${t.id}`}>
-                  <p className="title">{t.title}</p>
-                  <div className="meta">
-                    <span>{repoName(t.repo_id)}</span>
-                    {t.issue_number != null && <span>#{t.issue_number}</span>}
-                    {t.current_node && <span className="Label Label--accent">{t.current_node}</span>}
-                    {t.branch && <span className="Label">{t.branch}</span>}
+              {items.map((t) => {
+                const actions = taskActionsEnabled(boardActionContext(t));
+                return (
+                  <div key={t.id} className="board-card">
+                    <Link className="board-card-main" to={`/tasks/${t.id}`}>
+                      <p className="title">{t.title}</p>
+                      <div className="meta">
+                        <span>{repoName(t.repo_id)}</span>
+                        {t.issue_number != null && <span>#{t.issue_number}</span>}
+                        {t.current_node && (
+                          <span className="Label Label--accent">{t.current_node}</span>
+                        )}
+                        {t.branch && <span className="Label">{t.branch}</span>}
+                        {t.status === "paused" && (
+                          <span className={`State ${stateClass("paused")}`}>暂停</span>
+                        )}
+                      </div>
+                      {t.error && (
+                        <p className="board-card-error" title={t.error}>
+                          {t.error}
+                        </p>
+                      )}
+                    </Link>
+                    <details className="board-card-menu">
+                      <summary aria-label="任务操作">⋯</summary>
+                      <div className="board-card-menu-panel">
+                        {MENU_ACTIONS.map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            disabled={!actions[item.key]}
+                            onClick={(e) => void runCardAction(e, t.id, item.run)}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </details>
                   </div>
-                  {t.error && (
-                    <p className="board-card-error" title={t.error}>
-                      {t.error}
-                    </p>
-                  )}
-                </Link>
-              ))}
+                );
+              })}
             </section>
           );
         })}
