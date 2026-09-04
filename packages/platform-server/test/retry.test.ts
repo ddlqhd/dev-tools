@@ -82,7 +82,7 @@ test("handleTaskFailure requeues with backoff until the budget is spent", async 
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
-    store.insertTask(taskRow("t1"));
+    store.insertTask(taskRow("t1", { kernel_task_id: "k1" }));
 
     sync.handleTaskFailure("t1", "push failed: boom");
     let t = store.getTask("t1")!;
@@ -95,31 +95,39 @@ test("handleTaskFailure requeues with backoff until the budget is spent", async 
     // Not yet due: dequeue must skip it
     assert.equal(store.dequeueCandidates(10).find((x) => x.id === "t1"), undefined);
 
-    // Second failure consumes the last retry
-    store.updateTask("t1", { status: "running" });
+    // Second failure consumes the last retry (bound again after a successful re-dispatch)
+    store.updateTask("t1", { status: "running", kernel_task_id: "k2" });
     sync.handleTaskFailure("t1", "PR failed: boom again");
     t = store.getTask("t1")!;
     assert.equal(t.status, "queued");
     assert.equal(t.retry_count, 2);
 
     // Third failure is terminal
-    store.updateTask("t1", { status: "running" });
+    store.updateTask("t1", { status: "running", kernel_task_id: "k3" });
     sync.handleTaskFailure("t1", "still broken");
     t = store.getTask("t1")!;
     assert.equal(t.status, "failed");
     assert.match(t.error!, /still broken/);
 
     // Non-retryable errors fail immediately even with budget left
-    store.insertTask(taskRow("t2", { branch: null }));
+    store.insertTask(taskRow("t2", { branch: null, kernel_task_id: "k2" }));
     sync.handleTaskFailure("t2", "Budget exceeded: maxEngineCalls");
     assert.equal(store.getTask("t2")!.status, "failed");
 
-    store.insertTask(taskRow("t3", { branch: null }));
+    store.insertTask(taskRow("t3", { branch: null, kernel_task_id: "k3" }));
     sync.handleTaskFailure(
       "t3",
       "kernel createTask: 500 Inplace mode needs a clean working tree — commit or stash first",
     );
     assert.equal(store.getTask("t3")!.status, "failed");
+
+    // Never started: spawn / createTask must not sit in the queue
+    store.insertTask(taskRow("t4", { status: "preparing", branch: null, kernel_task_id: null }));
+    sync.handleTaskFailure("t4", "codeloop serve failed to spawn: spawn codeloop ENOENT");
+    t = store.getTask("t4")!;
+    assert.equal(t.status, "failed");
+    assert.match(t.error!, /spawn codeloop ENOENT/);
+    assert.equal(t.retry_count ?? 0, 0);
   } finally {
     await rm(tmp, { recursive: true, force: true });
     store.close();

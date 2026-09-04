@@ -169,9 +169,7 @@ export function TaskPage() {
               Retry
             </button>
           </div>
-          {task.error && (task.status === "failed" || task.status === "cancelled") && (
-            <p className="error">{task.error}</p>
-          )}
+          {task.error && <p className="error">{task.error}</p>}
           {error && <p className="error">{error}</p>}
         </div>
       </div>
@@ -565,9 +563,7 @@ function Overview({ detail }: { detail: TaskDetail }) {
             </div>
           ))}
         </dl>
-        {detail.error && (detail.status === "failed" || detail.status === "aborted") && (
-          <p className="error">{detail.error}</p>
-        )}
+        {detail.error && <p className="error">{detail.error}</p>}
       </div>
     </div>
   );

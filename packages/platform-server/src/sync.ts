@@ -70,15 +70,18 @@ export class EventSync {
 
   /**
    * Terminal-fail a task, or requeue it with exponential backoff while the
-   * retry budget allows. Non-retryable errors (budget exhaustion, bad config)
-   * skip the queue.
+   * retry budget allows. Dispatch/pre-start failures (no kernel task yet) and
+   * clearly-permanent errors skip the queue.
    */
   handleTaskFailure(taskId: string, message: string): void {
     const task = this.store.getTask(taskId);
     if (!task) return;
+    // Never started: spawn / createTask errors are not transient.
+    const neverStarted = task.kernel_task_id == null;
     // Only clearly-permanent errors skip the queue; transient lookalikes are
     // better absorbed by the retry budget (bounded) than lost forever.
     const nonRetryable =
+      neverStarted ||
       /budget exceeded|invalid duration|missing engine config|requirement required|clean working tree/i.test(
         message,
       );

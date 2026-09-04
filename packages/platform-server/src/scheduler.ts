@@ -247,6 +247,7 @@ export class Scheduler {
         instance_id: instance.id,
         kernel_task_id: created.taskId,
         branch: created.branch,
+        error: null,
       });
       this.hub({ type: "task.updated", payload: this.store.getTask(task.id) });
     } catch (err) {
