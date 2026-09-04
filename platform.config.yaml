@@ -5,7 +5,7 @@ listen:
   port: 4800
 github: {}
 scheduler:
-  globalMaxInstances: 2
+  globalMaxInstances: 10
   pollIntervalMs: 300000
   tickMs: 3000
 # 开发默认：用仓库内构建好的 CLI（发布态省略此项，自动用包内 CLI）
