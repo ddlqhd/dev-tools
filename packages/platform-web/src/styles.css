@@ -76,6 +76,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -107,13 +111,9 @@ code {
 
 /* Layout */
 .container {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 24px 16px 48px;
-}
-
-.container--board {
   max-width: 1800px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
 }
 
 /* Shared page chrome */
@@ -493,10 +493,14 @@ code {
 }
 
 .Header nav {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   align-items: center;
   gap: 4px;
   flex: 1;
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
 }
 
@@ -504,14 +508,16 @@ code {
   position: relative;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
+  min-width: 84px;
   height: 34px;
   padding: 0 11px;
   border: 1px solid transparent;
   border-radius: 7px;
   color: var(--header-muted);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   transition:
     color 120ms ease,
@@ -530,7 +536,6 @@ code {
   border-color: color-mix(in srgb, var(--accent-fg) 22%, transparent);
   background: color-mix(in srgb, var(--accent-fg) 10%, transparent);
   color: var(--header-fg);
-  font-weight: 600;
 }
 
 .Header-link.active::after {
@@ -627,6 +632,11 @@ code {
 }
 
 @media (max-width: 800px) {
+  .container {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
   .Header-inner {
     flex-wrap: wrap;
     gap: 0 8px;
@@ -649,6 +659,7 @@ code {
   .Header nav {
     order: 3;
     flex: 0 0 calc(100% + 24px);
+    width: auto;
     gap: 0;
     margin: 7px -12px 0;
     padding: 0 8px;
@@ -662,8 +673,7 @@ code {
   }
 
   .Header-link {
-    flex: 1 0 72px;
-    justify-content: center;
+    min-width: 72px;
     height: 43px;
     padding: 0 10px;
     border: 0;
