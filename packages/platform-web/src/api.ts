@@ -153,6 +153,17 @@ export const api = {
     defaultBranch?: string;
   }) =>
     req<{ repo: Repo }>("/api/repos", { method: "POST", body: JSON.stringify(body) }),
+  updateRepo: (
+    id: string,
+    body: {
+      clonePath?: string;
+      triggerLabel?: string;
+      maxConcurrency?: number;
+      defaultBranch?: string;
+      githubToken?: string;
+    },
+  ) =>
+    req<{ repo: Repo }>(`/api/repos/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   getConfigMeta: () => req<ConfigMeta>("/api/config/meta"),
   getRepoConfig: (id: string) =>
     req<{ config: CodeloopConfig; pipelines: string[] }>(`/api/repos/${id}/config`),
