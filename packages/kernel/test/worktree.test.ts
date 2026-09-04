@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -8,6 +8,7 @@ import {
   createTaskWorktree,
   createInplaceWorktree,
   openExistingWorktree,
+  snapshotWorkingTreeInto,
 } from "../src/git/worktree.js";
 
 function git(cwd: string, args: string[]): string {
@@ -107,6 +108,78 @@ test("WorktreeHandle: commit lifecycle and git queries", async () => {
   } finally {
     git(repo, ["worktree", "remove", "--force", wt.worktreePath]);
     git(repo, ["branch", "-D", "codeloop/abc123"]);
+  }
+});
+
+test("snapshotWorkingTreeInto: copies dirty + untracked files without touching the source", async () => {
+  await writeFile(join(repo, "README.md"), "# dirty\n", "utf8");
+  await writeFile(join(repo, "new-file.txt"), "untracked\n", "utf8");
+  git(repo, ["add", "README.md"]);
+
+  const wt = await createTaskWorktree({
+    repoPath: repo,
+    worktreeRoot: join(repo, ".codeloop", "worktrees"),
+    branchPrefix: "codeloop/",
+    taskId: "review1",
+  });
+  try {
+    assert.equal(await snapshotWorkingTreeInto(repo, wt), true);
+    assert.equal(await wt.statusPorcelain(), "");
+    assert.match(await wt.lastCommitMessage(), /snapshot working tree/);
+    const readme = execFileSync("git", ["show", "HEAD:README.md"], {
+      cwd: wt.worktreePath,
+      encoding: "utf8",
+    });
+    assert.equal(readme, "# dirty\n");
+    const added = execFileSync("git", ["show", "HEAD:new-file.txt"], {
+      cwd: wt.worktreePath,
+      encoding: "utf8",
+    });
+    assert.equal(added, "untracked\n");
+    // Source checkout still has the user's WIP.
+    assert.match(git(repo, ["status", "--porcelain"]), /README\.md/);
+    assert.match(git(repo, ["status", "--porcelain"]), /new-file\.txt/);
+    assert.equal(git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+  } finally {
+    git(repo, ["worktree", "remove", "--force", wt.worktreePath]);
+    git(repo, ["branch", "-D", "codeloop/review1"]);
+  }
+});
+
+test("snapshotWorkingTreeInto: HEAD excludes a dest node_modules symlink", async () => {
+  await writeFile(join(repo, ".gitignore"), "node_modules/\n", "utf8");
+  git(repo, ["add", ".gitignore"]);
+  git(repo, ["commit", "-m", "ignore node_modules"]);
+  await writeFile(join(repo, "README.md"), "# dirty\n", "utf8");
+  await mkdir(join(repo, "node_modules"), { recursive: true });
+  await writeFile(join(repo, "node_modules", "pkg"), "dep\n", "utf8");
+
+  const wt = await createTaskWorktree({
+    repoPath: repo,
+    worktreeRoot: join(repo, ".codeloop", "worktrees"),
+    branchPrefix: "codeloop/",
+    taskId: "review-nm",
+  });
+  try {
+    await symlink(join(repo, "node_modules"), join(wt.worktreePath, "node_modules"), "dir");
+    assert.equal(await snapshotWorkingTreeInto(repo, wt), true);
+    const tree = execFileSync("git", ["ls-tree", "-r", "-t", "--name-only", "HEAD"], {
+      cwd: wt.worktreePath,
+      encoding: "utf8",
+    });
+    assert.equal(
+      tree.split("\n").includes("node_modules"),
+      false,
+      `snapshot HEAD must not contain node_modules:\n${tree}`,
+    );
+    const readme = execFileSync("git", ["show", "HEAD:README.md"], {
+      cwd: wt.worktreePath,
+      encoding: "utf8",
+    });
+    assert.equal(readme, "# dirty\n");
+  } finally {
+    git(repo, ["worktree", "remove", "--force", wt.worktreePath]);
+    git(repo, ["branch", "-D", "codeloop/review-nm"]);
   }
 });
 

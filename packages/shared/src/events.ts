@@ -41,6 +41,9 @@ export interface TaskCreatedPayload {
   pipeline: { name: string; hash: string };
   repoPath: string;
   branch: string;
+  worktreePath: string;
+  /** Actual isolation mode — false when a dirty review is forced off-checkout. */
+  inplace: boolean;
 }
 
 export interface NodeStartedPayload {

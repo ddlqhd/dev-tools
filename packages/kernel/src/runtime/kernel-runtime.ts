@@ -25,6 +25,8 @@ import {
   createInplaceWorktree,
   createTaskWorktree,
   openExistingWorktree,
+  snapshotWorkingTreeInto,
+  workingTreeDirty,
   type GitWorktree,
 } from "../git/worktree.js";
 import { ArtifactStore, EventLog, KernelStore, type TaskRow } from "../store/index.js";
@@ -544,7 +546,12 @@ export class KernelRuntime {
 
     // ci-fix-style tasks must run on their own worktree: inplace mode would
     // silently drop the existingBranch and commit onto the repo checkout.
-    const useInplace = config.inplace && !opts.existingBranch;
+    // review-only on a dirty checkout also isolates: inplace reset --hard
+    // would wipe the user's uncommitted work, but the review needs those files.
+    const reviewSnapshot = pipelineReviewsWorkingTree(pipeline);
+    const isolateDirtyReview =
+      reviewSnapshot && !opts.existingBranch && (await workingTreeDirty(opts.repoPath));
+    const useInplace = config.inplace && !opts.existingBranch && !isolateDirtyReview;
     if (useInplace) {
       const active = this.findActiveInplaceTask(opts.repoPath);
       if (active) {
@@ -572,6 +579,10 @@ export class KernelRuntime {
         baseRef: opts.baseBranch,
         existingBranch: opts.existingBranch,
       });
+      if (reviewSnapshot) {
+        await snapshotWorkingTreeInto(opts.repoPath, worktree);
+      }
+      // Link after snapshot so the absolute node_modules symlink cannot be staged.
       await linkRepoNodeModules(opts.repoPath, worktree.worktreePath);
     }
 
@@ -601,7 +612,8 @@ export class KernelRuntime {
       pipeline: { name: pipeline.name, hash: pipeline.hash },
       repoPath: opts.repoPath,
       branch: worktree.branch,
-      inplace: config.inplace,
+      worktreePath: worktree.worktreePath,
+      inplace: useInplace,
     });
 
     const handle = new TaskHandle(
@@ -738,6 +750,11 @@ export class KernelRuntime {
     }
     return files;
   }
+}
+
+function pipelineReviewsWorkingTree(pipeline: LoadedPipeline): boolean {
+  const nodes = Object.values(pipeline.nodes);
+  return nodes.length > 0 && nodes.every((n) => n.type === "review");
 }
 
 function toRuntimeConfig(config: CodeloopConfig): RuntimeConfigView {

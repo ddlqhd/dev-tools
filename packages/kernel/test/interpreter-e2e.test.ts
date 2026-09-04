@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { InterventionRequest, KernelEvent } from "@devtools/shared";
 import {
@@ -423,5 +423,57 @@ test("inplace hygiene: .codeloop never committed, branch unchanged, tree clean",
   } finally {
     await cleanupRepo(repo);
     await rm(state, { force: true });
+  }
+});
+
+test("review-only on a dirty inplace checkout snapshots into an isolated worktree", async () => {
+  const repo = await freshRepo();
+  try {
+    await writeFile(join(repo, ".gitignore"), "node_modules/\n", "utf8");
+    await writeFile(join(repo, "WIP.md"), "local change\n", "utf8");
+    await mkdir(join(repo, "node_modules"), { recursive: true });
+    await writeFile(join(repo, "node_modules", "pkg"), "dep\n", "utf8");
+    const runtime = await KernelRuntime.open(repo);
+    try {
+      const seen: KernelEvent[] = [];
+      const handle = await runtime.createTask({
+        requirement: "review local changes",
+        repoPath: repo,
+        pipeline: "review-only",
+        inplace: true,
+        onEvent: (e) => seen.push(e),
+      });
+      const row = runtime.store.getTask(handle.taskId);
+      assert.ok(row);
+      assert.notEqual(row.worktree_path, repo);
+      assert.match(row.worktree_path, /worktrees/);
+      assert.equal(await readFile(join(row.worktree_path, "WIP.md"), "utf8"), "local change\n");
+      const created = seen.find((e) => e.type === "task.created");
+      assert.ok(created);
+      assert.equal((created.payload as { inplace: boolean }).inplace, false);
+      assert.equal((created.payload as { worktreePath: string }).worktreePath, row.worktree_path);
+      const tree = (await import("node:child_process")).execFileSync(
+        "git",
+        ["ls-tree", "-r", "-t", "--name-only", "HEAD"],
+        { cwd: row.worktree_path, encoding: "utf8" },
+      );
+      assert.equal(
+        tree.split("\n").includes("node_modules"),
+        false,
+        `snapshot HEAD must not contain node_modules:\n${tree}`,
+      );
+      assert.match(
+        (await import("node:child_process")).execFileSync(
+          "git",
+          ["status", "--porcelain"],
+          { cwd: repo, encoding: "utf8" },
+        ),
+        /WIP\.md/,
+      );
+    } finally {
+      runtime.close();
+    }
+  } finally {
+    await cleanupRepo(repo);
   }
 });

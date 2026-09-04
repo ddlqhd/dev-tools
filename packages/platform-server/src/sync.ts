@@ -79,7 +79,7 @@ export class EventSync {
     // Only clearly-permanent errors skip the queue; transient lookalikes are
     // better absorbed by the retry budget (bounded) than lost forever.
     const nonRetryable =
-      /budget exceeded|invalid duration|missing engine config|requirement required/i.test(
+      /budget exceeded|invalid duration|missing engine config|requirement required|clean working tree/i.test(
         message,
       );
     const count = task.retry_count ?? 0;

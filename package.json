@@ -10,7 +10,7 @@
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "codeloop": "pnpm --filter @devtools/cli exec node ./dist/index.js",
-    "platform:server": "pnpm --filter @devtools/platform-server start",
+    "platform:server": "node packages/platform-server/dist/cli.js",
     "platform:web": "pnpm --filter @devtools/platform-web dev",
     "platform:build": "pnpm --filter @devtools/platform-web build && pnpm --filter @devtools/platform-server build",
     "pack:release": "node scripts/pack-release.mjs"

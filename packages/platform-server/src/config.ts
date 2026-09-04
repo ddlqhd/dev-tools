@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +87,23 @@ function expandEnv(value: string): string {
   return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_, key: string) => process.env[key] ?? "");
 }
 
+/** Walk ancestors looking for `name` (e.g. platform.config.yaml). */
+function findFileWalkingUp(
+  start: string,
+  name: string,
+  opts: { stopAtGitRoot?: boolean } = {},
+): string | undefined {
+  let dir = resolve(start);
+  for (;;) {
+    const candidate = join(dir, name);
+    if (existsSync(candidate)) return candidate;
+    if (opts.stopAtGitRoot && existsSync(join(dir, ".git"))) return undefined;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
 /** Resolve where platform home / config live for global vs monorepo use. */
 export async function resolvePlatformPaths(opts: LoadPlatformConfigOptions = {}): Promise<{
   homeDir: string;
@@ -97,19 +114,9 @@ export async function resolvePlatformPaths(opts: LoadPlatformConfigOptions = {})
 
   if (opts.configPath) {
     const configPath = resolve(cwd, opts.configPath);
-    const homeDir = opts.dataDir
-      ? resolve(cwd, opts.dataDir)
-      : dirname(configPath);
-    return { homeDir, configPath, createdDefault: false };
-  }
-
-  if (opts.dataDir) {
-    const homeDir = resolve(cwd, opts.dataDir);
-    return {
-      homeDir,
-      configPath: join(homeDir, "platform.config.yaml"),
-      createdDefault: false,
-    };
+    // homeDir is the config's directory so relative yaml paths (codeloopBin,
+    // reposCache) stay anchored to the repo — --data-dir only overrides dataDir.
+    return { homeDir: dirname(configPath), configPath, createdDefault: false };
   }
 
   if (process.env.CODELOOP_PLATFORM_HOME) {
@@ -121,12 +128,20 @@ export async function resolvePlatformPaths(opts: LoadPlatformConfigOptions = {})
     };
   }
 
-  const cwdConfig = join(cwd, "platform.config.yaml");
-  try {
-    await access(cwdConfig);
-    return { homeDir: cwd, configPath: cwdConfig, createdDefault: false };
-  } catch {
-    // fall through
+  // pnpm --filter runs with cwd = packages/platform-server; walk up so the
+  // repo-root platform.config.yaml still wins over ~/.codeloop-platform.
+  const walked = findFileWalkingUp(cwd, "platform.config.yaml", { stopAtGitRoot: true });
+  if (walked) {
+    return { homeDir: dirname(walked), configPath: walked, createdDefault: false };
+  }
+
+  if (opts.dataDir) {
+    const homeDir = resolve(cwd, opts.dataDir);
+    return {
+      homeDir,
+      configPath: join(homeDir, "platform.config.yaml"),
+      createdDefault: false,
+    };
   }
 
   const homeDir = join(homedir(), ".codeloop-platform");
@@ -144,9 +159,11 @@ function detectDefaultCodeloopBin(baseDir: string): string[] {
   if (existsSync(bundledCli)) {
     return [process.execPath, bundledCli];
   }
-  // Monorepo layout relative to platform home / cwd
-  const monoCli = resolve(baseDir, "packages/cli/dist/index.js");
-  if (existsSync(monoCli)) {
+  // Monorepo: walk from this file and from platform home (cwd may be a package).
+  const monoCli =
+    findFileWalkingUp(here, "packages/cli/dist/index.js") ??
+    findFileWalkingUp(baseDir, "packages/cli/dist/index.js");
+  if (monoCli) {
     return [process.execPath, monoCli];
   }
   // Last resort: PATH lookup

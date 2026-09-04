@@ -113,6 +113,13 @@ test("handleTaskFailure requeues with backoff until the budget is spent", async 
     store.insertTask(taskRow("t2", { branch: null }));
     sync.handleTaskFailure("t2", "Budget exceeded: maxEngineCalls");
     assert.equal(store.getTask("t2")!.status, "failed");
+
+    store.insertTask(taskRow("t3", { branch: null }));
+    sync.handleTaskFailure(
+      "t3",
+      "kernel createTask: 500 Inplace mode needs a clean working tree — commit or stash first",
+    );
+    assert.equal(store.getTask("t3")!.status, "failed");
   } finally {
     await rm(tmp, { recursive: true, force: true });
     store.close();

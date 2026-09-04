@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 const TEMP_FILES = [
   ".codeloop-plan.md",
@@ -16,7 +16,7 @@ export interface GitWorktree {
   baseCommit: string;
   head(): Promise<string>;
   statusPorcelain(): Promise<string>;
-  addAllAndCommit(message: string, author: "engine" | "human"): Promise<string>;
+  addAllAndCommit(message: string, author: "engine" | "human", pathspecs?: string[]): Promise<string>;
   /** Soft-reset to base and create one commit with the full tree. */
   squashToBase(message: string, author: "engine" | "human"): Promise<string>;
   resetHard(sha: string): Promise<void>;
@@ -109,13 +109,66 @@ async function findWorktreeHoldingBranch(
  * `reset --hard` + `clean -fd`, so pre-existing uncommitted work is refused
  * rather than silently destroyed.
  */
+export async function workingTreeDirty(repoPath: string): Promise<boolean> {
+  const status = await git(repoPath, ["status", "--porcelain"]);
+  return Boolean(status.trim());
+}
+
+/**
+ * Copy the repo checkout's uncommitted changes into `dest` and commit them
+ * so later `reset --hard` / artifact guards see a clean tree. The source
+ * checkout is left untouched.
+ *
+ * Only the apply/copy paths are staged — never `git add -A` — so worktree
+ * setup side effects (e.g. a `node_modules` symlink) cannot enter the snapshot.
+ */
+export async function snapshotWorkingTreeInto(
+  repoPath: string,
+  dest: GitWorktree,
+): Promise<boolean> {
+  if (!(await workingTreeDirty(repoPath))) return false;
+
+  const trackedPaths = splitNul(await git(repoPath, ["diff", "HEAD", "--name-only", "-z"]));
+
+  const diff = await git(repoPath, ["diff", "HEAD", "--binary"]);
+  if (diff) {
+    await git(dest.worktreePath, ["apply", "--binary", "--whitespace=nowarn", "-"], 5, diff);
+  }
+
+  const destRoot = resolve(dest.worktreePath);
+  const copied: string[] = [];
+  const untracked = await git(repoPath, ["ls-files", "-z", "--others", "--exclude-standard"]);
+  for (const rel of splitNul(untracked)) {
+    if (rel === ".codeloop" || rel.startsWith(".codeloop/")) continue;
+    const from = resolve(repoPath, rel);
+    const nest = relative(destRoot, from);
+    if (nest === "" || (!nest.startsWith("..") && !isAbsolute(nest))) continue;
+    const st = await stat(from).catch(() => undefined);
+    if (!st?.isFile()) continue;
+    const to = join(dest.worktreePath, rel);
+    await mkdir(dirname(to), { recursive: true });
+    await copyFile(from, to);
+    copied.push(rel);
+  }
+
+  const pathspecs = [...new Set([...trackedPaths, ...copied])];
+  if (pathspecs.length === 0) return false;
+
+  await dest.addAllAndCommit("codeloop: snapshot working tree for review", "engine", pathspecs);
+  return true;
+}
+
+function splitNul(out: string): string[] {
+  return out.split("\0").filter(Boolean);
+}
+
 export async function createInplaceWorktree(repoPath: string): Promise<GitWorktree> {
   await excludeCodeloopState(repoPath);
 
-  const status = await git(repoPath, ["status", "--porcelain"]);
-  if (status.trim()) {
+  const status = (await git(repoPath, ["status", "--porcelain"])).trim();
+  if (status) {
     throw new Error(
-      `Inplace mode needs a clean working tree — commit or stash first:\n${status.trim()}`,
+      `Inplace mode needs a clean working tree — commit or stash first:\n${status}`,
     );
   }
 
@@ -212,8 +265,17 @@ class WorktreeHandle implements GitWorktree {
     return (await git(this.worktreePath, ["log", "-1", "--pretty=%B"])).trim();
   }
 
-  async addAllAndCommit(message: string, author: "engine" | "human"): Promise<string> {
-    await git(this.worktreePath, ["add", "-A"]);
+  async addAllAndCommit(
+    message: string,
+    author: "engine" | "human",
+    pathspecs?: string[],
+  ): Promise<string> {
+    if (pathspecs) {
+      if (pathspecs.length === 0) return this.head();
+      await git(this.worktreePath, ["add", "--", ...pathspecs]);
+    } else {
+      await git(this.worktreePath, ["add", "-A"]);
+    }
     const status = await this.statusPorcelain();
     if (!status.trim()) {
       return this.head();
@@ -317,11 +379,16 @@ async function commitWithAuthor(
   ]);
 }
 
-export async function git(cwd: string, args: string[], attempts = 5): Promise<string> {
+export async function git(
+  cwd: string,
+  args: string[],
+  attempts = 5,
+  input?: string,
+): Promise<string> {
   let lastErr: unknown;
   for (let i = 1; i <= attempts; i++) {
     try {
-      return await gitOnce(cwd, args);
+      return await gitOnce(cwd, args, input);
     } catch (err) {
       lastErr = err;
       const msg = err instanceof Error ? err.message : String(err);
@@ -335,16 +402,19 @@ export async function git(cwd: string, args: string[], attempts = 5): Promise<st
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
-function gitOnce(cwd: string, args: string[]): Promise<string> {
+function gitOnce(cwd: string, args: string[], input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
-    child.stdout.on("data", (b: Buffer) => out.push(b));
-    child.stderr.on("data", (b: Buffer) => err.push(b));
+    child.stdout?.on("data", (b: Buffer) => out.push(b));
+    child.stderr?.on("data", (b: Buffer) => err.push(b));
+    if (input !== undefined) {
+      child.stdin?.end(input);
+    }
     child.on("close", (code) => {
       const stdout = Buffer.concat(out).toString("utf8");
       const stderr = Buffer.concat(err).toString("utf8");
