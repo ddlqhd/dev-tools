@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { PageHeader } from "../components/PageHeader";
+import { PageState, StatusBanner } from "../components/PageState";
 import { api, type Repo } from "../api";
 
 type EditForm = {
@@ -88,7 +90,20 @@ export function ReposPage() {
   const editingRepo = editingId ? repos.find((r) => r.id === editingId) : undefined;
 
   return (
-    <>
+    <div className="page-stack">
+      <PageHeader
+        title="仓库"
+        description={
+          <>
+            <span>{repos.length} 个已接入</span>
+            <span aria-hidden="true"> · </span>
+            <span>接入本地目录或 GitHub 仓库后即可创建任务</span>
+          </>
+        }
+      />
+
+      {error && !editingId && <StatusBanner kind="error">{error}</StatusBanner>}
+
       <div className="Box">
         <div className="Box-header">
           <h2>接入仓库</h2>
@@ -98,53 +113,54 @@ export function ReposPage() {
             GitHub 仓库填 <code>owner/name</code>；本地仓库可把 Clone Path 指到已有 git
             目录（手工任务可不依赖 GitHub token）。
           </p>
-          <div className="row" style={{ marginBottom: 12 }}>
-          <label>
-            Full name
-            <input
-              value={form.fullName}
-              onChange={(e) => setForm({ ...form, fullName: e.target.value })}
-              placeholder="owner/repo 或 local/my-app"
-            />
-          </label>
-          <label>
-            Clone path
-            <input
-              value={form.clonePath}
-              onChange={(e) => setForm({ ...form, clonePath: e.target.value })}
-              placeholder="/abs/path/to/repo（可选）"
-            />
-          </label>
-          <label>
-            Trigger label
-            <input
-              value={form.triggerLabel}
-              onChange={(e) => setForm({ ...form, triggerLabel: e.target.value })}
-            />
-          </label>
-          <label>
-            Max concurrency
-            <input
-              type="number"
-              min={1}
-              value={form.maxConcurrency}
-              onChange={(e) =>
-                setForm({ ...form, maxConcurrency: Number(e.target.value) || 1 })
-              }
-            />
-          </label>
-          <label>
-            Default branch
-            <input
-              value={form.defaultBranch}
-              onChange={(e) => setForm({ ...form, defaultBranch: e.target.value })}
-            />
-          </label>
-        </div>
-          <button className="btn btn-primary" type="button" onClick={() => void create()}>
-            添加
-          </button>
-          {error && !editingId && <p className="error">{error}</p>}
+          <div className="form-grid">
+            <label>
+              仓库名
+              <input
+                value={form.fullName}
+                onChange={(e) => setForm({ ...form, fullName: e.target.value })}
+                placeholder="owner/repo 或 local/my-app"
+              />
+            </label>
+            <label>
+              Clone 路径
+              <input
+                value={form.clonePath}
+                onChange={(e) => setForm({ ...form, clonePath: e.target.value })}
+                placeholder="/abs/path/to/repo（可选）"
+              />
+            </label>
+            <label>
+              触发标签
+              <input
+                value={form.triggerLabel}
+                onChange={(e) => setForm({ ...form, triggerLabel: e.target.value })}
+              />
+            </label>
+            <label>
+              最大并发
+              <input
+                type="number"
+                min={1}
+                value={form.maxConcurrency}
+                onChange={(e) =>
+                  setForm({ ...form, maxConcurrency: Number(e.target.value) || 1 })
+                }
+              />
+            </label>
+            <label>
+              默认分支
+              <input
+                value={form.defaultBranch}
+                onChange={(e) => setForm({ ...form, defaultBranch: e.target.value })}
+              />
+            </label>
+          </div>
+          <div className="action-bar">
+            <button className="btn btn-primary" type="button" onClick={() => void create()}>
+              添加
+            </button>
+          </div>
         </div>
       </div>
 
@@ -154,32 +170,32 @@ export function ReposPage() {
           <span className="Counter">{repos.length}</span>
         </div>
         {editingRepo && editForm && (
-          <div className="Box-body">
+          <div className="edit-panel">
             <p className="muted">
               编辑 <code>{editingRepo.full_name}</code>
               {editingRepo.platform ? ` · ${editingRepo.platform}` : ""}
             </p>
-            <div className="row" style={{ marginBottom: 12 }}>
+            <div className="form-grid">
               <label>
-                Full name
+                仓库名
                 <input value={editingRepo.full_name} readOnly disabled />
               </label>
               <label>
-                Clone path
+                Clone 路径
                 <input
                   value={editForm.clonePath}
                   onChange={(e) => setEditForm({ ...editForm, clonePath: e.target.value })}
                 />
               </label>
               <label>
-                Trigger label
+                触发标签
                 <input
                   value={editForm.triggerLabel}
                   onChange={(e) => setEditForm({ ...editForm, triggerLabel: e.target.value })}
                 />
               </label>
               <label>
-                Max concurrency
+                最大并发
                 <input
                   type="number"
                   min={1}
@@ -193,7 +209,7 @@ export function ReposPage() {
                 />
               </label>
               <label>
-                Default branch
+                默认分支
                 <input
                   value={editForm.defaultBranch}
                   onChange={(e) => setEditForm({ ...editForm, defaultBranch: e.target.value })}
@@ -210,12 +226,8 @@ export function ReposPage() {
                 />
               </label>
             </div>
-            {editingRepo.has_github_token && (
-              <p className="muted" style={{ marginTop: 0 }}>
-                已配置 token
-              </p>
-            )}
-            <div className="row">
+            {editingRepo.has_github_token && <p className="muted">已配置 token</p>}
+            <div className="action-bar">
               <button
                 className="btn btn-primary"
                 type="button"
@@ -228,40 +240,50 @@ export function ReposPage() {
                 取消
               </button>
             </div>
-            {error && <p className="error">{error}</p>}
+            {error && <StatusBanner kind="error">{error}</StatusBanner>}
           </div>
         )}
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Path</th>
-              <th>Label</th>
-              <th>Concurrency</th>
-              <th>Branch</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {repos.map((r) => (
-              <tr key={r.id}>
-                <td>{r.full_name}</td>
-                <td className="muted">{r.clone_path}</td>
-                <td>
-                  <span className="Label Label--accent">{r.trigger_label}</span>
-                </td>
-                <td>{r.max_concurrency}</td>
-                <td className="muted">{r.default_branch}</td>
-                <td>
-                  <button className="btn" type="button" onClick={() => startEdit(r)}>
-                    编辑
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {repos.length === 0 ? (
+          <PageState kind="empty" title="还没有仓库">
+            用上方表单接入本地或 GitHub 仓库。
+          </PageState>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>路径</th>
+                  <th>标签</th>
+                  <th>并发</th>
+                  <th>分支</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {repos.map((r) => (
+                  <tr key={r.id}>
+                    <td>{r.full_name}</td>
+                    <td className="muted cell-clip" title={r.clone_path}>
+                      {r.clone_path}
+                    </td>
+                    <td>
+                      <span className="Label Label--accent">{r.trigger_label}</span>
+                    </td>
+                    <td>{r.max_concurrency}</td>
+                    <td className="muted">{r.default_branch}</td>
+                    <td>
+                      <button className="btn" type="button" onClick={() => startEdit(r)}>
+                        编辑
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-    </>
+    </div>
   );
 }

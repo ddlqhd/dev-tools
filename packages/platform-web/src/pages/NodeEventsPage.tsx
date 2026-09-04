@@ -6,6 +6,8 @@ import {
   parseStoredKernelEvents,
   type NodeStreamItem,
 } from "@devtools/shared";
+import { PageHeader } from "../components/PageHeader";
+import { PageState, StatusBanner } from "../components/PageState";
 import type { StageExecution, TaskDetail, TaskEvent } from "../api";
 import { fmtDuration, outcomeSummary, stageLabelClass, stateClass } from "../format";
 import { useTaskLive } from "../useTaskLive";
@@ -41,7 +43,17 @@ export function NodeEventsPage() {
   }
 
   if (!task || !detail) {
-    return <p className="muted">{error ?? "加载中…"}</p>;
+    return (
+      <div className="page-stack">
+        {error ? (
+          <PageState kind="error" title="无法加载节点过程">
+            {error}
+          </PageState>
+        ) : (
+          <PageState kind="loading" title="加载中…" />
+        )}
+      </div>
+    );
   }
 
   const stages = stagesForNode;
@@ -52,39 +64,32 @@ export function NodeEventsPage() {
     );
 
   return (
-    <>
-      <p className="muted">
-        <Link to={`/tasks/${id}`}>← {task.title}</Link>
-      </p>
-      <h1 className="issue-title">
-        {nodeId}
-        <span className={`State ${stateClass(task.status)}`}>{task.status}</span>
-      </h1>
-      <div className="issue-meta">
-        <span className="Label">{latestPrimitive(stages, nodeId, detail)}</span>
-        {stages[stages.length - 1]?.engine && (
-          <span className="muted">{stages[stages.length - 1]!.engine}</span>
-        )}
-        {task.current_node === nodeId && <span className="Label Label--accent">当前节点</span>}
-        <span className="muted">{stages.length ? `已执行 ${stages.length} 次` : "尚未执行"}</span>
-      </div>
-      {error && <p className="error">{error}</p>}
+    <div className="page-stack">
+      <PageHeader
+        crumb={{ to: `/tasks/${id}`, label: task.title }}
+        title={nodeId}
+        badge={<span className={`State ${stateClass(task.status)}`}>{task.status}</span>}
+        meta={
+          <>
+            <span className="Label">{latestPrimitive(stages, nodeId, detail)}</span>
+            {stages[stages.length - 1]?.engine && (
+              <span className="muted">{stages[stages.length - 1]!.engine}</span>
+            )}
+            {task.current_node === nodeId && <span className="Label Label--accent">当前节点</span>}
+            <span className="muted">{stages.length ? `已执行 ${stages.length} 次` : "尚未执行"}</span>
+          </>
+        }
+      />
+      {error && <StatusBanner kind="error">{error}</StatusBanner>}
 
       {!known ? (
-        <div className="Box">
-          <div className="Box-body">
-            <p className="muted">节点 {nodeId} 不在这条流水线中。</p>
-            <p>
-              <Link to={`/tasks/${id}`}>返回任务</Link>
-            </p>
-          </div>
-        </div>
+        <PageState kind="empty" title={`节点 ${nodeId} 不在这条流水线中`}>
+          <Link to={`/tasks/${id}`}>返回任务</Link>
+        </PageState>
       ) : stages.length === 0 ? (
-        <div className="Box">
-          <div className="Box-body">
-            <p className="muted">该节点尚未执行，暂无事件。</p>
-          </div>
-        </div>
+        <PageState kind="empty" title="该节点尚未执行">
+          暂无事件。
+        </PageState>
       ) : (
         stages.map((stage) => (
           <NodeRun
@@ -97,7 +102,7 @@ export function NodeEventsPage() {
           />
         ))
       )}
-    </>
+    </div>
   );
 }
 
@@ -128,17 +133,25 @@ function NodeRun({
     ? foldNodeEventStream(parseStoredKernelEvents(eventsInStageRange(events, stage, latest)))
     : [];
   const loopLabel = stage.loopLabel ? ` · ${stage.loopLabel}` : "";
+  const bodyId = `stage-body-${stage.index}`;
   return (
     <div className={`Box stage stage--${stage.status}`}>
-      <button type="button" className="stage-head" aria-expanded={expanded} onClick={onToggle}>
+      <button
+        type="button"
+        className="stage-head"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        onClick={onToggle}
+      >
         <span className="stage-title">
           第 {stage.nodeRun} 次{loopLabel}
         </span>
+        {latest && <span className="Label Label--accent">最新</span>}
         <span className="muted">{fmtDuration(stage.durationMs)}</span>
         <span className={`Label ${stageLabelClass(stage.status)}`}>{stage.status}</span>
       </button>
       {expanded && (
-        <div className="stage-body">
+        <div className="stage-body" id={bodyId}>
           {stage.error && <p className="error">{stage.error}</p>}
           {outcomeSummary(stage.outcome) && (
             <p>
@@ -149,12 +162,14 @@ function NodeRun({
           {stage.artifacts.length > 0 && (
             <p>
               <span className="muted">交付件 </span>
-              {stage.artifacts.map((a) => (
-                <span key={a.key} className="Label" style={{ marginRight: 6 }}>
-                  {a.key}
-                  {a.ext ? `.${a.ext}` : ""}
-                </span>
-              ))}
+              <span className="label-pack">
+                {stage.artifacts.map((a) => (
+                  <span key={a.key} className="Label">
+                    {a.key}
+                    {a.ext ? `.${a.ext}` : ""}
+                  </span>
+                ))}
+              </span>
             </p>
           )}
           {stage.filesChanged.length > 0 && (

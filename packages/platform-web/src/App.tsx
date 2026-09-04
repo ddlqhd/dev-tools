@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { BoardPage } from "./pages/BoardPage";
 import { TaskPage } from "./pages/TaskPage";
 import { NodeEventsPage } from "./pages/NodeEventsPage";
@@ -21,6 +21,65 @@ function MarkIcon() {
         <path d="M6.91 22.318L4.112 17.036L10.056 16.402Z" />
         <path d="M5.609 2.433L11.582 2.651L9.16 8.115Z" />
       </g>
+    </svg>
+  );
+}
+
+function BoardIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="1.5" y="2" width="3.5" height="12" rx="1" stroke="currentColor" />
+      <rect x="6.25" y="2" width="3.5" height="8" rx="1" stroke="currentColor" />
+      <rect x="11" y="2" width="3.5" height="10" rx="1" stroke="currentColor" />
+    </svg>
+  );
+}
+
+function RepoIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M1.5 4.25h4.25l1.4 1.5h7.35v6.5A1.25 1.25 0 0 1 13.25 13.5H2.75A1.25 1.25 0 0 1 1.5 12.25Z" />
+      <path d="M1.5 4.25V3.5A1.25 1.25 0 0 1 2.75 2.25H6l1.25 1.5h6A1.25 1.25 0 0 1 14.5 5" />
+    </svg>
+  );
+}
+
+function InstancesIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="1.5" y="1.75" width="13" height="5" rx="1.25" stroke="currentColor" />
+      <rect x="1.5" y="9.25" width="13" height="5" rx="1.25" stroke="currentColor" />
+      <circle cx="4" cy="4.25" r="0.75" fill="currentColor" />
+      <circle cx="4" cy="11.75" r="0.75" fill="currentColor" />
+      <path d="M7 4.25h4.5M7 11.75h4.5" stroke="currentColor" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      aria-hidden
+    >
+      <path d="M2 3.5h12M2 8h12M2 12.5h12" />
+      <circle cx="5" cy="3.5" r="1.5" fill="var(--header-bg)" />
+      <circle cx="10.5" cy="8" r="1.5" fill="var(--header-bg)" />
+      <circle cx="7" cy="12.5" r="1.5" fill="var(--header-bg)" />
     </svg>
   );
 }
@@ -55,46 +114,84 @@ const THEME_OPTIONS: Array<{ key: ThemeChoice; title: string; icon: () => ReactE
   { key: "system", title: "跟随系统", icon: SystemIcon },
 ];
 
+const NAV_ITEMS: Array<{
+  to: string;
+  label: string;
+  icon: () => ReactElement;
+}> = [
+  { to: "/", label: "看板", icon: BoardIcon },
+  { to: "/repos", label: "仓库", icon: RepoIcon },
+  { to: "/instances", label: "实例", icon: InstancesIcon },
+  { to: "/settings", label: "配置", icon: SettingsIcon },
+];
+
 export function App() {
   const [theme, setTheme] = useTheme();
   const location = useLocation();
+  const taskRouteActive = location.pathname.startsWith("/tasks/");
 
   return (
     <>
+      <a className="skip-link" href="#main-content">
+        跳到主要内容
+      </a>
       <header className="Header">
-        <NavLink to="/" className="Header-logo">
-          <MarkIcon />
-          codeloop platform
-        </NavLink>
-        <nav>
-          <NavLink to="/" end className={({ isActive }) => `Header-link${isActive ? " active" : ""}`}>
-            看板
+        <div className="Header-inner">
+          <NavLink to="/" className="Header-logo" aria-label="codeloop platform 首页" draggable={false}>
+            <span className="Header-mark">
+              <MarkIcon />
+            </span>
+            <span className="Header-brand">
+              <span className="Header-brand-name">codeloop</span>
+              <span className="Header-brand-product">platform</span>
+            </span>
           </NavLink>
-          <NavLink to="/repos" className={({ isActive }) => `Header-link${isActive ? " active" : ""}`}>
-            仓库
-          </NavLink>
-          <NavLink to="/instances" className={({ isActive }) => `Header-link${isActive ? " active" : ""}`}>
-            实例
-          </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => `Header-link${isActive ? " active" : ""}`}>
-            配置
-          </NavLink>
-        </nav>
-        <div className="theme-toggle" role="group" aria-label="主题">
-          {THEME_OPTIONS.map((opt) => (
-            <button
-              key={opt.key}
-              type="button"
-              title={opt.title}
-              className={theme === opt.key ? "active" : ""}
-              onClick={() => setTheme(opt.key)}
-            >
-              <opt.icon />
-            </button>
-          ))}
+          <nav aria-label="主要导航">
+            {NAV_ITEMS.map((item) => {
+              const isActive =
+                item.to === "/"
+                  ? location.pathname === "/" || taskRouteActive
+                  : location.pathname.startsWith(item.to);
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  draggable={false}
+                  aria-current={isActive ? "page" : undefined}
+                  className={`Header-link${isActive ? " active" : ""}`}
+                >
+                  <span className="Header-link-icon">
+                    <item.icon />
+                  </span>
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+          <div className="Header-actions">
+            <div className="theme-toggle" role="group" aria-label="外观主题">
+              {THEME_OPTIONS.map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  title={opt.title}
+                  aria-label={opt.title}
+                  aria-pressed={theme === opt.key}
+                  className={theme === opt.key ? "active" : ""}
+                  onClick={() => setTheme(opt.key)}
+                >
+                  <opt.icon />
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </header>
-      <main className={`container${location.pathname === "/" ? " container--board" : ""}`}>
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className={`container${location.pathname === "/" ? " container--board" : ""}`}
+      >
         <Routes>
           <Route path="/" element={<BoardPage />} />
           <Route path="/tasks/:id" element={<TaskPage />} />

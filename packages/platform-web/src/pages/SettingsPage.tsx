@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { PageHeader } from "../components/PageHeader";
+import { PageState, StatusBanner } from "../components/PageState";
 import { api, type CodeloopConfig, type Repo } from "../api";
 
 const STAGE_ALIASES = [
@@ -135,23 +137,30 @@ export function SettingsPage() {
 
   const pipelineOptions =
     config && !pipelines.includes(config.pipeline) ? [config.pipeline, ...pipelines] : pipelines;
+  const selectedRepo = repos.find((r) => r.id === repoId);
 
   return (
-    <>
+    <div className="page-stack">
+      <PageHeader
+        title="配置"
+        description={
+          selectedRepo
+            ? `写入 ${selectedRepo.full_name} 的 .codeloop/config.yaml，只影响之后新建的任务。`
+            : "按仓库写入 .codeloop/config.yaml，只影响之后新建的任务。"
+        }
+      />
+
       <div className="Box">
         <div className="Box-header">
           <h2>仓库</h2>
         </div>
         <div className="Box-body">
-          <p className="muted">
-            配置写入所选仓库的 <code>.codeloop/config.yaml</code>，只影响之后新建的任务。
-          </p>
           {repos.length === 0 ? (
-            <p className="muted">
-              还没有接入仓库，先到 <Link to="/repos">仓库</Link> 页添加。
-            </p>
+            <PageState kind="empty" title="还没有接入仓库">
+              先到 <Link to="/repos">仓库</Link> 页添加。
+            </PageState>
           ) : (
-            <div className="row">
+            <div className="form-grid">
               <label>
                 仓库
                 <select value={repoId} onChange={(e) => setRepoId(e.target.value)}>
@@ -168,104 +177,104 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {loading && (
-        <p className="muted">加载配置中…</p>
-      )}
+      {loading && <PageState kind="loading" title="加载配置中…" />}
 
       {config && (
         <>
-          <div className="Box">
-            <div className="Box-header">
-              <h2>流水线</h2>
-            </div>
-            <div className="Box-body">
-              <div className="row" style={{ marginBottom: 12 }}>
-                <label>
-                  Pipeline
-                  <select
-                    value={config.pipeline}
-                    onChange={(e) => update({ pipeline: e.target.value })}
-                  >
-                    {pipelineOptions.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+          <div className="section-grid">
+            <div className="Box">
+              <div className="Box-header">
+                <h2>流水线</h2>
               </div>
-              <div className="check-row">
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={config.autoApproveGates}
-                    onChange={(e) => update({ autoApproveGates: e.target.checked })}
-                  />
-                  自动批准门禁（autoApproveGates）
-                </label>
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={config.skipVerifyIfMissing}
-                    onChange={(e) => update({ skipVerifyIfMissing: e.target.checked })}
-                  />
-                  缺少 verify 配置时跳过
-                </label>
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={config.sandbox}
-                    onChange={(e) => update({ sandbox: e.target.checked })}
-                  />
-                  写操作启用 sandbox
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="Box">
-            <div className="Box-header">
-              <h2>工作区</h2>
-            </div>
-            <div className="Box-body">
-              <div className="check-row" style={{ marginBottom: 12 }}>
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={!config.inplace}
-                    onChange={(e) => update({ inplace: !e.target.checked })}
-                  />
-                  使用 Worktree 模式
-                </label>
-              </div>
-              {!config.inplace && (
-                <div className="row">
+              <div className="Box-body">
+                <div className="form-grid">
                   <label>
-                    分支前缀
-                    <input
-                      value={config.git.branchPrefix}
-                      onChange={(e) =>
-                        update({ git: { ...config.git, branchPrefix: e.target.value } })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Worktree 根目录
-                    <input
-                      value={config.git.worktreeRoot}
-                      onChange={(e) =>
-                        update({ git: { ...config.git, worktreeRoot: e.target.value } })
-                      }
-                    />
+                    Pipeline
+                    <select
+                      value={config.pipeline}
+                      onChange={(e) => update({ pipeline: e.target.value })}
+                    >
+                      {pipelineOptions.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 </div>
-              )}
-              {config.inplace && (
-                <p className="muted">
-                  Inplace 模式在仓库本身工作，提交落在当前分支，且不对工作区做{" "}
-                  <code>reset --hard</code> / <code>clean -fd</code>。
-                </p>
-              )}
+                <div className="check-row">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={config.autoApproveGates}
+                      onChange={(e) => update({ autoApproveGates: e.target.checked })}
+                    />
+                    自动批准门禁（autoApproveGates）
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={config.skipVerifyIfMissing}
+                      onChange={(e) => update({ skipVerifyIfMissing: e.target.checked })}
+                    />
+                    缺少 verify 配置时跳过
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={config.sandbox}
+                      onChange={(e) => update({ sandbox: e.target.checked })}
+                    />
+                    写操作启用 sandbox
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="Box">
+              <div className="Box-header">
+                <h2>工作区</h2>
+              </div>
+              <div className="Box-body">
+                <div className="check-row">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={!config.inplace}
+                      onChange={(e) => update({ inplace: !e.target.checked })}
+                    />
+                    使用 Worktree 模式
+                  </label>
+                </div>
+                {!config.inplace && (
+                  <div className="form-grid">
+                    <label>
+                      分支前缀
+                      <input
+                        value={config.git.branchPrefix}
+                        onChange={(e) =>
+                          update({ git: { ...config.git, branchPrefix: e.target.value } })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Worktree 根目录
+                      <input
+                        value={config.git.worktreeRoot}
+                        onChange={(e) =>
+                          update({ git: { ...config.git, worktreeRoot: e.target.value } })
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+                {config.inplace && (
+                  <p className="muted">
+                    Inplace 模式在仓库本身工作，提交落在当前分支，且不对工作区做{" "}
+                    <code>reset --hard</code> / <code>clean -fd</code>。
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -278,7 +287,7 @@ export function SettingsPage() {
                 模型 id 可空（用引擎默认）。可用 <code>agent --list-models</code> 或{" "}
                 <code>opencode models</code> 查看。
               </p>
-              <div className="row" style={{ marginBottom: 12 }}>
+              <div className="form-grid">
                 <label>
                   智能体
                   <select value={bulkType} onChange={(e) => setBulkType(e.target.value)}>
@@ -297,54 +306,58 @@ export function SettingsPage() {
                     placeholder="可选"
                   />
                 </label>
+              </div>
+              <div className="action-bar">
                 <button className="btn" type="button" onClick={applyBulk}>
                   应用到全部阶段
                 </button>
               </div>
-              <table className="engine-table">
-                <thead>
-                  <tr>
-                    <th>阶段</th>
-                    <th>智能体</th>
-                    <th>模型</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {STAGE_ALIASES.map((stage) => {
-                    const engine = config.engines[stage.key] ?? { type: "cursor" };
-                    return (
-                      <tr key={stage.key}>
-                        <td>
-                          {stage.label}
-                          <span className="muted"> {stage.key}</span>
-                        </td>
-                        <td>
-                          <select
-                            value={engine.type}
-                            onChange={(e) => setEngine(stage.key, "type", e.target.value)}
-                          >
-                            {engineOptions.map((eng) => (
-                              <option key={eng.id} value={eng.id}>
-                                {eng.label}
-                              </option>
-                            ))}
-                            {!engineOptions.some((eng) => eng.id === engine.type) && (
-                              <option value={engine.type}>{engine.type}</option>
-                            )}
-                          </select>
-                        </td>
-                        <td>
-                          <input
-                            value={engine.model ?? ""}
-                            onChange={(e) => setEngine(stage.key, "model", e.target.value)}
-                            placeholder="引擎默认"
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <div className="table-scroll">
+                <table className="engine-table">
+                  <thead>
+                    <tr>
+                      <th>阶段</th>
+                      <th>智能体</th>
+                      <th>模型</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {STAGE_ALIASES.map((stage) => {
+                      const engine = config.engines[stage.key] ?? { type: "cursor" };
+                      return (
+                        <tr key={stage.key}>
+                          <td>
+                            {stage.label}
+                            <span className="muted"> {stage.key}</span>
+                          </td>
+                          <td>
+                            <select
+                              value={engine.type}
+                              onChange={(e) => setEngine(stage.key, "type", e.target.value)}
+                            >
+                              {engineOptions.map((eng) => (
+                                <option key={eng.id} value={eng.id}>
+                                  {eng.label}
+                                </option>
+                              ))}
+                              {!engineOptions.some((eng) => eng.id === engine.type) && (
+                                <option value={engine.type}>{engine.type}</option>
+                              )}
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              value={engine.model ?? ""}
+                              onChange={(e) => setEngine(stage.key, "model", e.target.value)}
+                              placeholder="引擎默认"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
@@ -353,7 +366,7 @@ export function SettingsPage() {
               <h2>预算</h2>
             </div>
             <div className="Box-body">
-              <div className="row">
+              <div className="form-grid">
                 <label>
                   最大引擎调用次数
                   <input
@@ -390,7 +403,7 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="row">
+          <div className="sticky-actions">
             <button
               className="btn btn-primary"
               type="button"
@@ -399,12 +412,13 @@ export function SettingsPage() {
             >
               {saving ? "保存中…" : "保存"}
             </button>
-            {saved && <p className="success">已保存</p>}
+            {saved && <StatusBanner kind="success">已保存</StatusBanner>}
+            {error && <StatusBanner kind="error">{error}</StatusBanner>}
           </div>
         </>
       )}
 
-      {error && <p className="error">{error}</p>}
-    </>
+      {!config && !loading && error && <StatusBanner kind="error">{error}</StatusBanner>}
+    </div>
   );
 }

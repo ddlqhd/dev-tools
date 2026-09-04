@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { buildWorkflowView, countWorkflowNodes, taskActionsEnabled } from "@devtools/shared";
 import { Markdown } from "../components/Markdown";
+import { PageHeader } from "../components/PageHeader";
+import { PageState, StatusBanner } from "../components/PageState";
 import {
   api,
   type TaskDetail,
@@ -83,58 +85,66 @@ export function TaskPage() {
   };
 
   if (!task || !actions) {
-    return <p className="muted">{error ?? "加载中…"}</p>;
+    return (
+      <div className="page-stack">
+        {error ? (
+          <PageState kind="error" title="无法加载任务">
+            {error}
+          </PageState>
+        ) : (
+          <PageState kind="loading" title="加载中…" />
+        )}
+      </div>
+    );
   }
 
   const workflow = workflowOf(detail);
 
   return (
-    <>
-      <p className="muted">
-        <Link to="/">← 看板</Link>
-      </p>
-      <h1 className="issue-title">
-        {task.title}
-        <span className={`State ${stateClass(task.status)}`}>{task.status}</span>
-      </h1>
-      <div className="issue-meta">
-        {repo && <span>{repo.full_name}</span>}
-        {task.issue_number != null && repo && (
-          <a
-            href={`https://github.com/${repo.full_name}/issues/${task.issue_number}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            issue #{task.issue_number}
-          </a>
-        )}
-        {task.pr_number != null && repo && (
-          <a
-            href={`https://github.com/${repo.full_name}/pull/${task.pr_number}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            PR #{task.pr_number}
-          </a>
-        )}
-        {task.current_node && <span className="Label Label--accent">{task.current_node}</span>}
-        {task.branch && <span className="Label">{task.branch}</span>}
-        {task.kernel_task_id && <span>kernel={task.kernel_task_id}</span>}
-      </div>
-
-      <div className="Box">
-        <div className="Box-header">
-          <h2>操作</h2>
-        </div>
-        <div className="Box-body">
-          <div className="row">
+    <div className="page-stack">
+      <PageHeader
+        crumb={{ to: "/", label: "看板" }}
+        title={task.title}
+        badge={<span className={`State ${stateClass(task.status)}`}>{task.status}</span>}
+        meta={
+          <>
+            {repo && <span>{repo.full_name}</span>}
+            {task.issue_number != null && repo && (
+              <a
+                href={`https://github.com/${repo.full_name}/issues/${task.issue_number}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                issue #{task.issue_number}
+              </a>
+            )}
+            {task.pr_number != null && repo && (
+              <a
+                href={`https://github.com/${repo.full_name}/pull/${task.pr_number}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                PR #{task.pr_number}
+              </a>
+            )}
+            {task.current_node && <span className="Label Label--accent">{task.current_node}</span>}
+            {task.branch && (
+              <span className="Label" title={task.branch}>
+                {task.branch}
+              </span>
+            )}
+            {task.kernel_task_id && <span>kernel={task.kernel_task_id}</span>}
+          </>
+        }
+        actions={
+          <div className="action-bar">
             <button
               className="btn"
               type="button"
               disabled={!actions.pause}
               onClick={() => void act(() => api.pause(task.id))}
             >
-              Pause
+              暂停
             </button>
             <button
               className="btn"
@@ -142,7 +152,7 @@ export function TaskPage() {
               disabled={!actions.resume}
               onClick={() => void act(() => api.resume(task.id))}
             >
-              Resume
+              继续
             </button>
             <button
               className="btn btn-danger"
@@ -150,7 +160,7 @@ export function TaskPage() {
               disabled={!actions.abort}
               onClick={() => void act(() => api.abort(task.id))}
             >
-              Abort
+              中止
             </button>
             <button
               className="btn"
@@ -158,7 +168,7 @@ export function TaskPage() {
               disabled={!actions.cancel}
               onClick={() => void act(() => api.cancel(task.id))}
             >
-              Cancel
+              取消
             </button>
             <button
               className="btn"
@@ -166,17 +176,18 @@ export function TaskPage() {
               disabled={!actions.retry}
               onClick={() => void act(() => api.retry(task.id))}
             >
-              Retry
+              重试
             </button>
           </div>
-          {task.error && <p className="error">{task.error}</p>}
-          {error && <p className="error">{error}</p>}
-        </div>
-      </div>
+        }
+      />
+
+      {task.error && <StatusBanner kind="error">{task.error}</StatusBanner>}
+      {error && <StatusBanner kind="error">{error}</StatusBanner>}
 
       {detail && <Overview detail={detail} />}
 
-      <div className="grid-2">
+      <div className="section-grid">
         <div className="Box">
           <div className="Box-header">
             <h2>介入</h2>
@@ -185,8 +196,8 @@ export function TaskPage() {
             {pendingReqId ? (
               <>
                 <div className="plan-panel">
-                  <div className="row" style={{ marginBottom: 8 }}>
-                    <strong style={{ flex: 1 }}>
+                  <div className="plan-toolbar">
+                    <strong>
                       {pendingIsLimit ? "循环已达上限" : "审阅计划 (planDoc)"}
                     </strong>
                     <button
@@ -203,12 +214,12 @@ export function TaskPage() {
                   ) : editingPlan ? (
                     <div className="plan-doc">
                       <textarea
+                        className="plan-editor"
                         value={editText}
                         onChange={(e) => setEditText(e.target.value)}
                         rows={18}
-                        style={{ width: "100%", fontFamily: "monospace" }}
                       />
-                      <div className="row" style={{ marginTop: 8 }}>
+                      <div className="action-bar plan-editor-actions">
                         <button
                           className="btn btn-primary"
                           type="button"
@@ -223,7 +234,7 @@ export function TaskPage() {
                             })
                           }
                         >
-                          保存并 Approve
+                          保存并批准
                         </button>
                         <button
                           className="btn"
@@ -245,12 +256,12 @@ export function TaskPage() {
                   )}
                 </div>
                 {pendingIsLimit && (
-                  <p className="muted" style={{ marginBottom: 8 }}>
-                    {kernel?.pendingIntervention?.summary ?? "循环已达最大次数。"} Approve
-                    将带着当前结果继续后续步骤，Reject 则保持挂起。
+                  <p className="muted plan-hint">
+                    {kernel?.pendingIntervention?.summary ?? "循环已达最大次数。"} 批准
+                    将带着当前结果继续后续步骤，驳回则保持挂起。
                   </p>
                 )}
-                <div className="row" style={{ marginBottom: 12 }}>
+                <div className="action-bar">
                   <button
                     className="btn btn-primary"
                     type="button"
@@ -259,7 +270,7 @@ export function TaskPage() {
                       void act(() => api.intervene(task.id, pendingReqId, { action: "approve" }))
                     }
                   >
-                    Approve
+                    批准
                   </button>
                   <button
                     className="btn"
@@ -276,7 +287,6 @@ export function TaskPage() {
                     placeholder="驳回意见"
                     value={rejectText}
                     onChange={(e) => setRejectText(e.target.value)}
-                    style={{ flex: 1 }}
                   />
                   <button
                     className="btn btn-danger"
@@ -298,16 +308,15 @@ export function TaskPage() {
                       )
                     }
                   >
-                    Reject
+                    驳回
                   </button>
                 </div>
               </>
             ) : (
               <p className="muted">当前无待处理审批门</p>
             )}
-            <div className="row">
+            <div className="action-bar">
               <input
-                style={{ flex: 1 }}
                 placeholder="注入指令…"
                 value={injectText}
                 onChange={(e) => setInjectText(e.target.value)}
@@ -323,7 +332,7 @@ export function TaskPage() {
                   })
                 }
               >
-                Inject
+                注入
               </button>
             </div>
           </div>
@@ -352,12 +361,12 @@ export function TaskPage() {
               ))}
             </div>
           ) : (
-            <p className="muted">无法还原流水线定义</p>
+            <PageState kind="empty" title="无法还原流水线定义" />
           )}
         </div>
       </div>
 
-      <div className="grid-2">
+      <div className="section-grid">
         <div className="Box">
           <div className="Box-header">
             <h2>交付件</h2>
@@ -365,44 +374,44 @@ export function TaskPage() {
           <div className="Box-body">
             {detail && detail.artifacts.length > 0 ? (
               <>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>交付件</th>
-                      <th>产出节点</th>
-                      <th>更新时间</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.artifacts.map((a) => (
-                      <tr key={a.key}>
-                        <td>
-                          <button
-                            className="btn"
-                            type="button"
-                            onClick={() => void loadArtifact(a.key)}
-                          >
-                            {a.key}.{a.ext}
-                          </button>{" "}
-                          <span className="muted">{fmtBytes(a.size)}</span>
-                        </td>
-                        <td className="muted">{a.producedByNodeId ?? "—"}</td>
-                        <td className="muted">{fmtClock(a.mtime)}</td>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>交付件</th>
+                        <th>产出节点</th>
+                        <th>更新时间</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {detail.artifacts.map((a) => (
+                        <tr key={a.key}>
+                          <td>
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={() => void loadArtifact(a.key)}
+                            >
+                              {a.key}.{a.ext}
+                            </button>{" "}
+                            <span className="muted">{fmtBytes(a.size)}</span>
+                          </td>
+                          <td className="muted">{a.producedByNodeId ?? "—"}</td>
+                          <td className="muted">{fmtClock(a.mtime)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 {preview && (
                   <>
-                    <p className="muted" style={{ margin: "12px 0 6px" }}>
-                      {preview.key}
-                    </p>
+                    <p className="muted preview-kicker">{preview.key}</p>
                     <pre className="artifact">{prettyJson(preview.text)}</pre>
                   </>
                 )}
               </>
             ) : (
-              <p className="muted">暂无交付件</p>
+              <PageState kind="empty" title="暂无交付件" />
             )}
           </div>
         </div>
@@ -412,7 +421,7 @@ export function TaskPage() {
             <h2>提交与介入</h2>
           </div>
           <div className="Box-body">
-            <h3 style={{ fontSize: 13, margin: "0 0 8px" }}>提交</h3>
+            <h3 className="subsection-title">提交</h3>
             {detail && detail.commits.length > 0 ? (
               <ul className="plain">
                 {detail.commits.map((c) => (
@@ -436,7 +445,7 @@ export function TaskPage() {
             ) : (
               <p className="muted">暂无提交</p>
             )}
-            <h3 style={{ fontSize: 13, margin: "16px 0 8px" }}>介入记录</h3>
+            <h3 className="subsection-title subsection-title--later">介入记录</h3>
             {detail && detail.interventions.length > 0 ? (
               <ul className="plain">
                 {detail.interventions.map((i) => (
@@ -456,7 +465,7 @@ export function TaskPage() {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -520,7 +529,7 @@ function WorkflowNode({
       <span className="Label">{node.primitive}</span>
       {node.engine && <span className="muted">{node.engine}</span>}
       {node.runCount > 1 && <span className="Label">第 {node.runCount} 次</span>}
-      <span style={{ flex: 1 }} />
+      <span className="grow-spacer" />
       <span className="muted">{fmtDuration(node.durationMs)}</span>
       <span className={`Label ${stageLabelClass(node.status)}`}>{node.status}</span>
     </Link>
