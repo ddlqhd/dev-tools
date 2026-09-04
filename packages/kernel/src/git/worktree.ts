@@ -14,6 +14,12 @@ export interface GitWorktree {
   branch: string;
   /** SHA the task branch was created from (exclusive base for squash). */
   baseCommit: string;
+  /**
+   * True when the handle points at the repository checkout itself
+   * (`repoPath` === `worktreePath`). Inplace handles never run
+   * `reset --hard` / `clean -fd`.
+   */
+  readonly inplace: boolean;
   head(): Promise<string>;
   statusPorcelain(): Promise<string>;
   addAllAndCommit(message: string, author: "engine" | "human", pathspecs?: string[]): Promise<string>;
@@ -104,11 +110,6 @@ async function findWorktreeHoldingBranch(
   return null;
 }
 
-/**
- * Inplace mode: operate on the repository checkout itself. Pause/rollback uses
- * `reset --hard` + `clean -fd`, so pre-existing uncommitted work is refused
- * rather than silently destroyed.
- */
 export async function workingTreeDirty(repoPath: string): Promise<boolean> {
   const status = await git(repoPath, ["status", "--porcelain"]);
   return Boolean(status.trim());
@@ -162,15 +163,13 @@ function splitNul(out: string): string[] {
   return out.split("\0").filter(Boolean);
 }
 
+/**
+ * Inplace mode: operate on the repository checkout itself. Commits land on the
+ * current branch. Pause/rollback never runs `reset --hard` / `clean -fd`, so a
+ * dirty working tree is allowed.
+ */
 export async function createInplaceWorktree(repoPath: string): Promise<GitWorktree> {
   await excludeCodeloopState(repoPath);
-
-  const status = (await git(repoPath, ["status", "--porcelain"])).trim();
-  if (status) {
-    throw new Error(
-      `Inplace mode needs a clean working tree — commit or stash first:\n${status}`,
-    );
-  }
 
   const branch = (await git(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
   if (branch === "HEAD") {
@@ -216,12 +215,16 @@ export async function openExistingWorktree(
 }
 
 class WorktreeHandle implements GitWorktree {
+  readonly inplace: boolean;
+
   constructor(
     readonly repoPath: string,
     readonly worktreePath: string,
     readonly branch: string,
     readonly baseCommit: string,
-  ) {}
+  ) {
+    this.inplace = resolve(repoPath) === resolve(worktreePath);
+  }
 
   async head(): Promise<string> {
     return (await git(this.worktreePath, ["rev-parse", "HEAD"])).trim();
@@ -320,6 +323,17 @@ class WorktreeHandle implements GitWorktree {
           // ok
         }
       }
+
+      // Index still holds the pre-soft HEAD tree. If it matches base, history
+      // had no content change. Inplace restores before add -A so WT dirt is kept;
+      // linked worktrees still fall through to stage any WT dirt into a commit.
+      const indexTree = (await git(this.worktreePath, ["write-tree"])).trim();
+      const baseTree = await this.treeHash("HEAD");
+      if (this.inplace && indexTree === baseTree) {
+        await this.restoreAfterSoftReset(head);
+        return head;
+      }
+
       await git(this.worktreePath, ["add", "-A"]);
       // Ensure orchestrator temp files are not part of the squash commit.
       try {
@@ -339,7 +353,7 @@ class WorktreeHandle implements GitWorktree {
       if (!status.trim()) {
         // Soft reset with identical tree to base — nothing to commit.
         // Restore original HEAD so we don't leave the branch at base with a dirty index.
-        await git(this.worktreePath, ["reset", "--hard", head]);
+        await this.restoreAfterSoftReset(head);
         return head;
       }
 
@@ -347,7 +361,7 @@ class WorktreeHandle implements GitWorktree {
       return this.head();
     } catch (err) {
       try {
-        await this.resetHard(head);
+        await this.restoreAfterSoftReset(head);
       } catch {
         // best-effort restore
       }
@@ -355,7 +369,20 @@ class WorktreeHandle implements GitWorktree {
     }
   }
 
+  /**
+   * Undo a soft-reset to `sha`. Linked worktrees hard-reset; inplace restores
+   * HEAD+index with `--mixed` so the working tree is preserved.
+   */
+  private async restoreAfterSoftReset(sha: string): Promise<void> {
+    if (this.inplace) {
+      await git(this.worktreePath, ["reset", "--mixed", sha]);
+      return;
+    }
+    await this.resetHard(sha);
+  }
+
   async resetHard(sha: string): Promise<void> {
+    if (this.inplace) return;
     await git(this.worktreePath, ["reset", "--hard", sha]);
     await git(this.worktreePath, ["clean", "-fd"]);
   }

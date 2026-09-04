@@ -117,7 +117,7 @@ test("handleTaskFailure requeues with backoff until the budget is spent", async 
     store.insertTask(taskRow("t3", { branch: null, kernel_task_id: "k3" }));
     sync.handleTaskFailure(
       "t3",
-      "kernel createTask: 500 Inplace mode needs a clean working tree — commit or stash first",
+      "kernel createTask: 500 Missing engine config for: coder",
     );
     assert.equal(store.getTask("t3")!.status, "failed");
 

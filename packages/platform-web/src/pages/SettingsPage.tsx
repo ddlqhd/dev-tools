@@ -261,7 +261,10 @@ export function SettingsPage() {
                 </div>
               )}
               {config.inplace && (
-                <p className="muted">Inplace 模式在仓库本身工作，需要干净的 working tree。</p>
+                <p className="muted">
+                  Inplace 模式在仓库本身工作，提交落在当前分支，且不对工作区做{" "}
+                  <code>reset --hard</code> / <code>clean -fd</code>。
+                </p>
               )}
             </div>
           </div>

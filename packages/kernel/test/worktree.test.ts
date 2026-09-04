@@ -183,18 +183,69 @@ test("snapshotWorkingTreeInto: HEAD excludes a dest node_modules symlink", async
   }
 });
 
-test("createInplaceWorktree: clean repo ok, dirty rejected, detached rejected", async () => {
-  const wt = await createInplaceWorktree(repo);
-  assert.equal(wt.worktreePath, repo);
-  assert.equal(wt.branch, "main");
-  assert.equal(wt.baseCommit, git(repo, ["rev-parse", "HEAD"]));
+test("createInplaceWorktree: dirty ok, detached rejected; resetHard is no-op", async () => {
+  const clean = await createInplaceWorktree(repo);
+  assert.equal(clean.worktreePath, repo);
+  assert.equal(clean.branch, "main");
+  assert.equal(clean.inplace, true);
+  assert.equal(clean.baseCommit, git(repo, ["rev-parse", "HEAD"]));
 
   await writeFile(join(repo, "dirty.txt"), "x\n", "utf8");
-  await assert.rejects(() => createInplaceWorktree(repo), /clean working tree/);
-  await rm(join(repo, "dirty.txt"));
+  const headBefore = git(repo, ["rev-parse", "HEAD"]);
+  const wt = await createInplaceWorktree(repo);
+  assert.equal(wt.inplace, true);
+  assert.match(await wt.statusPorcelain(), /dirty\.txt/);
 
+  await wt.resetHard(headBefore);
+  assert.equal(await wt.head(), headBefore);
+  assert.match(await wt.statusPorcelain(), /dirty\.txt/);
+
+  const reopened = await openExistingWorktree(repo, repo, "main", wt.baseCommit);
+  assert.equal(reopened.inplace, true);
+  await reopened.resetHard(headBefore);
+  assert.match(await reopened.statusPorcelain(), /dirty\.txt/);
+
+  await rm(join(repo, "dirty.txt"));
   git(repo, ["checkout", "--detach", "HEAD"]);
   await assert.rejects(() => createInplaceWorktree(repo), /detached HEAD/);
+});
+
+test("linked worktree: inplace is false and resetHard clears dirt", async () => {
+  const wt = await createTaskWorktree({
+    repoPath: repo,
+    worktreeRoot: join(repo, ".codeloop", "worktrees"),
+    branchPrefix: "codeloop/",
+    taskId: "linked1",
+  });
+  try {
+    assert.equal(wt.inplace, false);
+    const base = wt.baseCommit;
+    await writeFile(join(wt.worktreePath, "dirt.txt"), "y\n", "utf8");
+    await wt.resetHard(base);
+    assert.equal(await wt.head(), base);
+    assert.equal((await wt.statusPorcelain()).trim(), "");
+  } finally {
+    git(repo, ["worktree", "remove", "--force", wt.worktreePath]);
+    git(repo, ["branch", "-D", "codeloop/linked1"]);
+  }
+});
+
+test("inplace squashToBase: identical-tree restore keeps pre-squash dirty files", async () => {
+  // Empty commit on base → soft reset leaves index tree == base; restore with
+  // --mixed before add -A so startup dirty files remain.
+  git(repo, ["commit", "--allow-empty", "-m", "empty on top"]);
+  await writeFile(join(repo, "wip.txt"), "keep me\n", "utf8");
+  const headBefore = git(repo, ["rev-parse", "HEAD"]);
+  const base = git(repo, ["rev-parse", "HEAD~1"]);
+
+  const wt = await openExistingWorktree(repo, repo, "main", base);
+  assert.equal(wt.inplace, true);
+  assert.equal(await wt.head(), headBefore);
+
+  const result = await wt.squashToBase("noop squash", "engine");
+  assert.equal(result, headBefore);
+  assert.equal(await wt.head(), headBefore);
+  assert.match(await wt.statusPorcelain(), /wip\.txt/);
 });
 
 test("openExistingWorktree: reopens a worktree handle", async () => {
@@ -208,6 +259,7 @@ test("openExistingWorktree: reopens a worktree handle", async () => {
     const reopened = await openExistingWorktree(repo, wt.worktreePath, "codeloop/abc123", wt.baseCommit);
     assert.equal(await reopened.head(), await wt.head());
     assert.equal(reopened.branch, "codeloop/abc123");
+    assert.equal(reopened.inplace, false);
   } finally {
     git(repo, ["worktree", "remove", "--force", wt.worktreePath]);
     git(repo, ["branch", "-D", "codeloop/abc123"]);

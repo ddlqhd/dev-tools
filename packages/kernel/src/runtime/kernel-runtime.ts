@@ -546,8 +546,8 @@ export class KernelRuntime {
 
     // ci-fix-style tasks must run on their own worktree: inplace mode would
     // silently drop the existingBranch and commit onto the repo checkout.
-    // review-only on a dirty checkout also isolates: inplace reset --hard
-    // would wipe the user's uncommitted work, but the review needs those files.
+    // review-only on a dirty checkout also isolates: review needs those files
+    // snapshotted into a linked worktree (inplace resetHard is a no-op).
     const reviewSnapshot = pipelineReviewsWorkingTree(pipeline);
     const isolateDirtyReview =
       reviewSnapshot && !opts.existingBranch && (await workingTreeDirty(opts.repoPath));

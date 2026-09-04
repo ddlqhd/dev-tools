@@ -82,7 +82,7 @@ export class EventSync {
     // better absorbed by the retry budget (bounded) than lost forever.
     const nonRetryable =
       neverStarted ||
-      /budget exceeded|invalid duration|missing engine config|requirement required|clean working tree/i.test(
+      /budget exceeded|invalid duration|missing engine config|requirement required/i.test(
         message,
       );
     const count = task.retry_count ?? 0;

@@ -40,7 +40,7 @@ export const CodeloopConfigSchema = z.object({
   skipVerifyIfMissing: z.boolean().default(true),
   /**
    * Run the task in the repository itself instead of a dedicated linked worktree.
-   * Requires a clean working tree; commits land on the current branch.
+   * Commits land on the current branch; never runs `reset --hard` / `clean -fd`.
    */
   inplace: z.boolean().default(false),
   /** Sandbox write-mode engine turns. Verify/commit turns always run unsandboxed. */
@@ -93,7 +93,8 @@ git:
   worktreeRoot: .codeloop/worktrees
 autoApproveGates: false
 skipVerifyIfMissing: true
-# Work directly in the repo (no worktree). Needs a clean working tree.
+# Work directly in the repo (no worktree). Commits land on the current branch;
+# does not reset --hard / clean -fd the working tree.
 inplace: false
 # Sandbox write-mode engine turns (verify/commit always run unsandboxed).
 sandbox: false
