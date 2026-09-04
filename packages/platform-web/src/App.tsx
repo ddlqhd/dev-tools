@@ -137,16 +137,35 @@ export function App() {
       </a>
       <header className="Header">
         <div className="Header-inner">
-          <NavLink to="/" className="Header-logo" aria-label="codeloop platform 首页" draggable={false}>
-            <span className="Header-mark">
-              <MarkIcon />
-            </span>
-            <span className="Header-brand">
-              <span className="Header-brand-name">codeloop</span>
-              <span className="Header-brand-product">platform</span>
-            </span>
-          </NavLink>
-          <nav aria-label="主要导航">
+          <div className="Header-top">
+            <NavLink to="/" className="Header-logo" aria-label="codeloop platform 首页" draggable={false}>
+              <span className="Header-mark">
+                <MarkIcon />
+              </span>
+              <span className="Header-brand">
+                <span className="Header-brand-name">codeloop</span>
+                <span className="Header-brand-product">platform</span>
+              </span>
+            </NavLink>
+            <div className="Header-actions">
+              <div className="theme-toggle" role="group" aria-label="外观主题">
+                {THEME_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    title={opt.title}
+                    aria-label={opt.title}
+                    aria-pressed={theme === opt.key}
+                    className={theme === opt.key ? "active" : ""}
+                    onClick={() => setTheme(opt.key)}
+                  >
+                    <opt.icon />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <nav className="Header-nav" aria-label="主要导航">
             {NAV_ITEMS.map((item) => {
               const isActive =
                 item.to === "/"
@@ -163,28 +182,13 @@ export function App() {
                   <span className="Header-link-icon">
                     <item.icon />
                   </span>
-                  <span>{item.label}</span>
+                  <span className="Header-link-label" data-label={item.label}>
+                    {item.label}
+                  </span>
                 </Link>
               );
             })}
           </nav>
-          <div className="Header-actions">
-            <div className="theme-toggle" role="group" aria-label="外观主题">
-              {THEME_OPTIONS.map((opt) => (
-                <button
-                  key={opt.key}
-                  type="button"
-                  title={opt.title}
-                  aria-label={opt.title}
-                  aria-pressed={theme === opt.key}
-                  className={theme === opt.key ? "active" : ""}
-                  onClick={() => setTheme(opt.key)}
-                >
-                  <opt.icon />
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </header>
       <main

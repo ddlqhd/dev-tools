@@ -29,6 +29,8 @@
   --header-muted: #7d8590;
   --counter-bg: rgba(110, 118, 129, 0.4);
   --control-bg: #0d1117;
+  --underline-nav-active: #f78166;
+  --control-transparent-hover: rgba(177, 186, 196, 0.12);
 }
 
 :root[data-theme="light"] {
@@ -61,6 +63,8 @@
   --header-muted: #59636e;
   --counter-bg: rgba(31, 35, 40, 0.08);
   --control-bg: #ffffff;
+  --underline-nav-active: #fd8c73;
+  --control-transparent-hover: rgba(208, 215, 222, 0.32);
 }
 
 :root {
@@ -422,13 +426,20 @@ code {
 
 .Header-inner {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  align-items: stretch;
   width: 100%;
   max-width: 1800px;
-  min-height: 56px;
   margin: 0 auto;
   padding: 0 20px;
+}
+
+.Header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 52px;
 }
 
 .Header-logo {
@@ -492,88 +503,83 @@ code {
   text-transform: uppercase;
 }
 
-.Header nav {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  width: max-content;
-  max-width: 100%;
+.Header-nav {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
   min-width: 0;
+  min-height: 48px;
 }
 
 .Header-link {
   position: relative;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-width: 84px;
-  height: 34px;
-  padding: 0 11px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  color: var(--header-muted);
-  font-size: 13px;
-  font-weight: 600;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--header-fg);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
   white-space: nowrap;
-  transition:
-    color 120ms ease,
-    border-color 120ms ease,
-    background 120ms ease;
 }
 
 .Header-link:hover {
-  border-color: var(--btn-border);
-  background: var(--btn-bg);
+  background: var(--control-transparent-hover);
   color: var(--header-fg);
   text-decoration: none;
 }
 
 .Header-link.active {
-  border-color: color-mix(in srgb, var(--accent-fg) 22%, transparent);
-  background: color-mix(in srgb, var(--accent-fg) 10%, transparent);
-  color: var(--header-fg);
+  font-weight: 600;
 }
 
 .Header-link.active::after {
   content: "";
   position: absolute;
-  bottom: -12px;
-  left: 50%;
-  width: 22px;
+  right: 0;
+  bottom: -9px;
+  left: 0;
   height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--accent-fg);
-  transform: translateX(-50%);
+  pointer-events: none;
+  background: var(--underline-nav-active);
+}
+
+.Header-link-label {
+  display: inline-grid;
+  justify-items: start;
+}
+
+.Header-link-label::after {
+  content: attr(data-label);
+  height: 0;
+  overflow: hidden;
+  font-weight: 600;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .Header-link-icon {
   display: inline-flex;
   color: var(--header-muted);
-  transition: color 120ms ease;
 }
 
 .Header-link-icon svg {
   display: block;
 }
 
-.Header-link:hover .Header-link-icon {
-  color: var(--header-fg);
-}
-
+.Header-link:hover .Header-link-icon,
 .Header-link.active .Header-link-icon {
-  color: var(--accent-fg);
+  color: var(--header-fg);
 }
 
 .Header-actions {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  padding-left: 14px;
-  border-left: 1px solid var(--border-muted);
 }
 
 .theme-toggle {
@@ -638,57 +644,29 @@ code {
   }
 
   .Header-inner {
-    flex-wrap: wrap;
-    gap: 0 8px;
-    min-height: 0;
-    padding: 7px 12px 0;
+    padding: 0 12px;
+  }
+
+  .Header-top {
+    min-height: 48px;
   }
 
   .Header-logo {
     height: 36px;
-    margin-right: auto;
     padding-block: 0;
   }
 
-  .Header-actions {
-    height: 36px;
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .Header nav {
-    order: 3;
-    flex: 0 0 calc(100% + 24px);
-    width: auto;
-    gap: 0;
-    margin: 7px -12px 0;
-    padding: 0 8px;
+  .Header-nav {
+    gap: 4px;
+    margin: 0 -12px;
+    padding: 0 12px;
     overflow-x: auto;
-    border-top: 1px solid var(--border-muted);
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
 
-  .Header nav::-webkit-scrollbar {
+  .Header-nav::-webkit-scrollbar {
     display: none;
-  }
-
-  .Header-link {
-    min-width: 72px;
-    height: 43px;
-    padding: 0 10px;
-    border: 0;
-    border-radius: 0;
-  }
-
-  .Header-link:hover,
-  .Header-link.active {
-    border-color: transparent;
-    background: transparent;
-  }
-
-  .Header-link.active::after {
-    bottom: 0;
-    height: 3px;
   }
 }
 
