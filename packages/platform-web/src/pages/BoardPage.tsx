@@ -18,6 +18,8 @@ const COLUMNS: Array<{ key: TaskStatus | "active"; title: string; match: TaskSta
   { key: "failed", title: "失败", match: ["failed", "cancelled"] },
 ];
 
+const TERMINAL_STATUSES: TaskStatus[] = ["done", "merged", "failed", "cancelled"];
+
 const TIME_PRESETS: Array<{ mode: TimeFilterMode; label: string }> = [
   { mode: "all", label: "全部" },
   { mode: "today", label: "今天" },
@@ -155,6 +157,10 @@ export function BoardPage() {
     () => tasks.filter((t) => taskMatchesTimeRange(t.created_at, timeRange)),
     [tasks, timeRange],
   );
+  const openTaskCount = useMemo(
+    () => filteredTasks.filter((task) => !TERMINAL_STATUSES.includes(task.status)).length,
+    [filteredTasks],
+  );
 
   const pipelineOptions =
     form.pipeline && !pipelines.includes(form.pipeline) ? [form.pipeline, ...pipelines] : pipelines;
@@ -202,109 +208,149 @@ export function BoardPage() {
 
   return (
     <>
-      {!createOpen && error && <p className="error">{error}</p>}
+      <div className="board-page">
+        {!createOpen && error && <p className="error board-error">{error}</p>}
 
-      <div className="board-toolbar">
-        <button
-          className="btn btn-primary"
-          type="button"
-          onClick={() => {
-            setError(null);
-            setCreateOpen(true);
-          }}
-        >
-          新建任务
-        </button>
-      </div>
-
-      <div className="board-time-filter row">
-        {TIME_PRESETS.map(({ mode, label }) => (
+        <div className="board-heading">
+          <div>
+            <h1>任务看板</h1>
+            <p>
+              <span>{filteredTasks.length} 个任务</span>
+              <span aria-hidden="true"> · </span>
+              <span>{openTaskCount} 个未结束</span>
+            </p>
+          </div>
           <button
-            key={mode}
+            className="btn btn-primary"
             type="button"
-            className={timeMode === mode ? "btn btn-primary" : "btn"}
-            onClick={() => selectPreset(mode)}
+            onClick={() => {
+              setError(null);
+              setCreateOpen(true);
+            }}
           >
-            {label}
+            新建任务
           </button>
-        ))}
-        <label>
-          从
-          <input
-            type="date"
-            value={rangeFrom}
-            onChange={(e) => {
-              setRangeFrom(e.target.value);
-              setTimeMode("custom");
-            }}
-          />
-        </label>
-        <label>
-          到
-          <input
-            type="date"
-            value={rangeTo}
-            onChange={(e) => {
-              setRangeTo(e.target.value);
-              setTimeMode("custom");
-            }}
-          />
-        </label>
-      </div>
+        </div>
 
-      <div className="board">
-        {COLUMNS.map((col) => {
-          const items = filteredTasks.filter((t) => col.match.includes(t.status));
-          return (
-            <section key={col.key} className="board-column">
-              <h3>
-                <span>{col.title}</span>
-                <span className="Counter">{items.length}</span>
-              </h3>
-              {items.map((t) => {
-                const actions = taskActionsEnabled(boardActionContext(t));
-                return (
-                  <div key={t.id} className="board-card">
-                    <Link className="board-card-main" to={`/tasks/${t.id}`}>
-                      <p className="title">{t.title}</p>
-                      <div className="meta">
-                        <span>{repoName(t.repo_id)}</span>
-                        {t.issue_number != null && <span>#{t.issue_number}</span>}
-                        {t.current_node && (
-                          <span className="Label Label--accent">{t.current_node}</span>
-                        )}
-                        {t.branch && <span className="Label">{t.branch}</span>}
-                        {t.status === "paused" && (
-                          <span className={`State ${stateClass("paused")}`}>暂停</span>
-                        )}
-                      </div>
-                      {t.error && (
-                        <p className="board-card-error" title={t.error}>
-                          {t.error}
-                        </p>
-                      )}
-                    </Link>
-                    <details className="board-card-menu">
-                      <summary aria-label="任务操作">⋯</summary>
-                      <div className="board-card-menu-panel">
-                        {MENU_ACTIONS.map((item) => (
-                          <button
-                            key={item.key}
-                            type="button"
-                            disabled={!actions[item.key]}
-                            onClick={(e) => void runCardAction(e, t.id, item.run)}
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-                    </details>
+        <div className="board-filterbar" aria-label="按创建时间筛选">
+          <span className="board-filter-label">创建时间</span>
+          <div className="board-preset-group" role="group" aria-label="快捷时间范围">
+            {TIME_PRESETS.map(({ mode, label }) => (
+              <button
+                key={mode}
+                type="button"
+                className={timeMode === mode ? "btn active" : "btn"}
+                aria-pressed={timeMode === mode}
+                onClick={() => selectPreset(mode)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="board-date-range">
+            <label className="board-date-field">
+              <span>从</span>
+              <input
+                type="date"
+                value={rangeFrom}
+                onChange={(e) => {
+                  setRangeFrom(e.target.value);
+                  setTimeMode("custom");
+                }}
+              />
+            </label>
+            <span className="board-date-separator" aria-hidden="true">
+              —
+            </span>
+            <label className="board-date-field">
+              <span>到</span>
+              <input
+                type="date"
+                value={rangeTo}
+                onChange={(e) => {
+                  setRangeTo(e.target.value);
+                  setTimeMode("custom");
+                }}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="board-viewport">
+          <div className="board">
+            {COLUMNS.map((col) => {
+              const items = filteredTasks.filter((t) => col.match.includes(t.status));
+              return (
+                <section key={col.key} className={`board-column board-column--${col.key}`}>
+                  <header className="board-column-header">
+                    <div>
+                      <span className="board-column-dot" aria-hidden="true" />
+                      <h2>{col.title}</h2>
+                    </div>
+                    <span className="Counter" aria-label={`${items.length} 个任务`}>
+                      {items.length}
+                    </span>
+                  </header>
+                  <div className="board-column-body">
+                    {items.length === 0 && <p className="board-column-empty">暂无任务</p>}
+                    {items.map((t) => {
+                      const actions = taskActionsEnabled(boardActionContext(t));
+                      const repository = repoName(t.repo_id);
+                      return (
+                        <div key={t.id} className="board-card">
+                          <Link className="board-card-main" to={`/tasks/${t.id}`}>
+                            <p className="title" title={t.title}>
+                              {t.title}
+                            </p>
+                            <div className="board-card-context">
+                              <span className="board-card-repo" title={repository}>
+                                {repository}
+                              </span>
+                              {t.issue_number != null && <span>#{t.issue_number}</span>}
+                            </div>
+                            <div className="meta">
+                              {t.current_node && (
+                                <span className="Label Label--accent">{t.current_node}</span>
+                              )}
+                              {t.branch && (
+                                <span className="Label board-card-branch" title={t.branch}>
+                                  {t.branch}
+                                </span>
+                              )}
+                              {t.status === "paused" && (
+                                <span className={`State ${stateClass("paused")}`}>暂停</span>
+                              )}
+                            </div>
+                            {t.error && (
+                              <p className="board-card-error" title={t.error}>
+                                {t.error}
+                              </p>
+                            )}
+                          </Link>
+                          <details className="board-card-menu">
+                            <summary aria-label={`${t.title}的任务操作`}>⋯</summary>
+                            <div className="board-card-menu-panel">
+                              {MENU_ACTIONS.map((item) => (
+                                <button
+                                  key={item.key}
+                                  type="button"
+                                  disabled={!actions[item.key]}
+                                  onClick={(e) => void runCardAction(e, t.id, item.run)}
+                                >
+                                  {item.label}
+                                </button>
+                              ))}
+                            </div>
+                          </details>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </section>
-          );
-        })}
+                </section>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {createOpen && (

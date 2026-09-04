@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { BoardPage } from "./pages/BoardPage";
 import { TaskPage } from "./pages/TaskPage";
 import { NodeEventsPage } from "./pages/NodeEventsPage";
@@ -57,6 +57,7 @@ const THEME_OPTIONS: Array<{ key: ThemeChoice; title: string; icon: () => ReactE
 
 export function App() {
   const [theme, setTheme] = useTheme();
+  const location = useLocation();
 
   return (
     <>
@@ -93,7 +94,7 @@ export function App() {
           ))}
         </div>
       </header>
-      <main className="container">
+      <main className={`container${location.pathname === "/" ? " container--board" : ""}`}>
         <Routes>
           <Route path="/" element={<BoardPage />} />
           <Route path="/tasks/:id" element={<TaskPage />} />
