@@ -626,6 +626,12 @@ label {
   background: var(--canvas-subtle);
 }
 
+.stage-head .stage-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .stage-body {
   padding: 4px 12px 12px;
   border-top: 1px solid var(--border-muted);
