@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   eventsInStageRange,
@@ -22,11 +23,28 @@ export function NodeEventsPage() {
   const nodeId = decodeNodeId(rawNodeId);
   const { task, detail, events, error } = useTaskLive(id);
 
+  const stagesForNode = detail?.stages.filter((s) => s.nodeId === nodeId) ?? [];
+  const latestStageIndex = stagesForNode.at(-1)?.index ?? null;
+  const [expanded, setExpanded] = useState<Set<number> | null>(null);
+  const effectiveExpanded =
+    expanded ?? (latestStageIndex != null ? new Set([latestStageIndex]) : new Set());
+
+  useEffect(() => {
+    setExpanded(null);
+  }, [nodeId, latestStageIndex]);
+
+  function toggle(stageIndex: number) {
+    const next = new Set(effectiveExpanded);
+    if (next.has(stageIndex)) next.delete(stageIndex);
+    else next.add(stageIndex);
+    setExpanded(next);
+  }
+
   if (!task || !detail) {
     return <p className="muted">{error ?? "加载中…"}</p>;
   }
 
-  const stages = detail.stages.filter((s) => s.nodeId === nodeId);
+  const stages = stagesForNode;
   const known =
     stages.length > 0 ||
     (detail.workflow?.steps ?? []).some((step) =>
@@ -73,7 +91,9 @@ export function NodeEventsPage() {
             key={stage.index}
             stage={stage}
             events={events}
-            latest={stage.index === detail.stages[detail.stages.length - 1]?.index}
+            latest={stage.index === latestStageIndex}
+            expanded={effectiveExpanded.has(stage.index)}
+            onToggle={() => toggle(stage.index)}
           />
         ))
       )}
@@ -95,62 +115,69 @@ function NodeRun({
   stage,
   events,
   latest,
+  expanded,
+  onToggle,
 }: {
   stage: StageExecution;
   events: TaskEvent[];
   latest: boolean;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
-  const slice = eventsInStageRange(events, stage, latest);
-  const items = foldNodeEventStream(parseStoredKernelEvents(slice));
+  const items = expanded
+    ? foldNodeEventStream(parseStoredKernelEvents(eventsInStageRange(events, stage, latest)))
+    : [];
+  const loopLabel = stage.loopLabel ? ` · ${stage.loopLabel}` : "";
   return (
     <div className={`Box stage stage--${stage.status}`}>
-      <div className="Box-header">
-        <h2>
-          第 {stage.nodeRun} 次
-          {stage.loopLabel ? ` · ${stage.loopLabel}` : ""}
-        </h2>
+      <button type="button" className="stage-head" aria-expanded={expanded} onClick={onToggle}>
+        <span className="stage-title">
+          第 {stage.nodeRun} 次{loopLabel}
+        </span>
         <span className="muted">{fmtDuration(stage.durationMs)}</span>
         <span className={`Label ${stageLabelClass(stage.status)}`}>{stage.status}</span>
-      </div>
-      <div className="Box-body">
-        {stage.error && <p className="error">{stage.error}</p>}
-        {outcomeSummary(stage.outcome) && (
-          <p>
-            <span className="muted">结果 </span>
-            {outcomeSummary(stage.outcome)}
+      </button>
+      {expanded && (
+        <div className="stage-body">
+          {stage.error && <p className="error">{stage.error}</p>}
+          {outcomeSummary(stage.outcome) && (
+            <p>
+              <span className="muted">结果 </span>
+              {outcomeSummary(stage.outcome)}
+            </p>
+          )}
+          {stage.artifacts.length > 0 && (
+            <p>
+              <span className="muted">交付件 </span>
+              {stage.artifacts.map((a) => (
+                <span key={a.key} className="Label" style={{ marginRight: 6 }}>
+                  {a.key}
+                  {a.ext ? `.${a.ext}` : ""}
+                </span>
+              ))}
+            </p>
+          )}
+          {stage.filesChanged.length > 0 && (
+            <p>
+              <span className="muted">改动文件 </span>
+              {stage.filesChanged.join(", ")}
+            </p>
+          )}
+          {stage.retries.length > 0 && (
+            <p className="error">
+              重试 {stage.retries.map((r) => `#${r.attempt} ${r.error}`).join("; ")}
+            </p>
+          )}
+          <p className="muted">
+            {stage.usage
+              ? `${stage.usage.turns} turns · in ${stage.usage.inputTokens} / out ${stage.usage.outputTokens} · `
+              : ""}
+            {stage.toolUseCount ? `${stage.toolUseCount} 次工具调用 · ` : ""}
+            seq {stage.eventRange.from}–{stage.eventRange.to}
           </p>
-        )}
-        {stage.artifacts.length > 0 && (
-          <p>
-            <span className="muted">交付件 </span>
-            {stage.artifacts.map((a) => (
-              <span key={a.key} className="Label" style={{ marginRight: 6 }}>
-                {a.key}
-                {a.ext ? `.${a.ext}` : ""}
-              </span>
-            ))}
-          </p>
-        )}
-        {stage.filesChanged.length > 0 && (
-          <p>
-            <span className="muted">改动文件 </span>
-            {stage.filesChanged.join(", ")}
-          </p>
-        )}
-        {stage.retries.length > 0 && (
-          <p className="error">
-            重试 {stage.retries.map((r) => `#${r.attempt} ${r.error}`).join("; ")}
-          </p>
-        )}
-        <p className="muted">
-          {stage.usage
-            ? `${stage.usage.turns} turns · in ${stage.usage.inputTokens} / out ${stage.usage.outputTokens} · `
-            : ""}
-          {stage.toolUseCount ? `${stage.toolUseCount} 次工具调用 · ` : ""}
-          seq {stage.eventRange.from}–{stage.eventRange.to}
-        </p>
-        <NodeStream items={items} />
-      </div>
+          <NodeStream items={items} />
+        </div>
+      )}
     </div>
   );
 }
