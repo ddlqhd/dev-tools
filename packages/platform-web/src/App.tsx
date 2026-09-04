@@ -138,14 +138,11 @@ export function App() {
       <header className="Header">
         <div className="Header-inner">
           <div className="Header-top">
-            <NavLink to="/" className="Header-logo" aria-label="codeloop platform 首页" draggable={false}>
+            <NavLink to="/" className="Header-logo" aria-label="CodeLoop 首页" draggable={false}>
               <span className="Header-mark">
                 <MarkIcon />
               </span>
-              <span className="Header-brand">
-                <span className="Header-brand-name">codeloop</span>
-                <span className="Header-brand-product">platform</span>
-              </span>
+              <span className="Header-brand">CodeLoop</span>
             </NavLink>
             <div className="Header-actions">
               <div className="theme-toggle" role="group" aria-label="外观主题">

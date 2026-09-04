@@ -483,24 +483,9 @@ code {
 }
 
 .Header-brand {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.05;
-}
-
-.Header-brand-name {
-  font-size: 14px;
+  font-size: 20px;
   font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.Header-brand-product {
-  margin-top: 3px;
-  color: var(--header-muted);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  letter-spacing: -0.02em;
 }
 
 .Header-nav {
@@ -671,14 +656,6 @@ code {
 }
 
 @media (max-width: 420px) {
-  .Header-brand-product {
-    display: none;
-  }
-
-  .Header-brand {
-    display: block;
-  }
-
   .Header-mark {
     width: 30px;
     height: 30px;
