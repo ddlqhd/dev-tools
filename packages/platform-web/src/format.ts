@@ -1,4 +1,4 @@
-import type { StageExecution, Task } from "./api";
+import type { StageExecution, Task, UsageTotals } from "./api";
 
 export function fmtDuration(ms: number | undefined): string {
   if (ms == null) return "—";
@@ -7,6 +7,14 @@ export function fmtDuration(ms: number | undefined): string {
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   return s % 60 ? `${m}m ${s % 60}s` : `${m}m`;
+}
+
+export function fmtUsage(usage: UsageTotals): string {
+  const total = usage.inputTokens + usage.outputTokens;
+  let text =
+    `${usage.turns} turns · 合计 ${total} tokens · in ${usage.inputTokens} / out ${usage.outputTokens}`;
+  if (usage.costUsd != null) text += ` · $${usage.costUsd.toFixed(4)}`;
+  return text;
 }
 
 export function fmtBytes(n: number): string {
