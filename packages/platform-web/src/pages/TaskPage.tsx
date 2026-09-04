@@ -9,7 +9,7 @@ import {
   type WorkflowStepView,
   type WorkflowView,
 } from "../api";
-import { fmtBytes, fmtClock, fmtDuration, prettyJson, stageLabelClass, stageToneClass, stateClass } from "../format";
+import { fmtBytes, fmtClock, fmtDuration, fmtUsage, prettyJson, stageLabelClass, stageToneClass, stateClass } from "../format";
 import { useTaskLive } from "../useTaskLive";
 
 export function TaskPage() {
@@ -543,10 +543,7 @@ function Overview({ detail }: { detail: TaskDetail }) {
         detail.endedAt ? fmtClock(detail.endedAt) : "进行中"
       }`,
     ],
-    [
-      "引擎用量",
-      `${detail.usage.turns} turns · in ${detail.usage.inputTokens} / out ${detail.usage.outputTokens}`,
-    ],
+    ["Token 消耗", fmtUsage(detail.usage)],
     ["事件", `${detail.eventCount} 条 (seq ≤ ${detail.lastSeq})`],
   ];
   return (

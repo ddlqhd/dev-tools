@@ -4,6 +4,7 @@ export type {
   ArtifactFile,
   InterventionRecord,
   StageExecution,
+  UsageTotals,
   WorkflowLoopView,
   WorkflowNodeStatus,
   WorkflowNodeView,
