@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, connectHub, type Repo, type Task, type TaskStatus } from "../api";
+import {
+  resolveTimeRange,
+  taskMatchesTimeRange,
+  type TimeFilterMode,
+} from "../task-time-filter";
 
 const COLUMNS: Array<{ key: TaskStatus | "active"; title: string; match: TaskStatus[] }> = [
   { key: "queued", title: "排队", match: ["queued", "preparing"] },
@@ -10,12 +15,22 @@ const COLUMNS: Array<{ key: TaskStatus | "active"; title: string; match: TaskSta
   { key: "failed", title: "失败", match: ["failed", "cancelled"] },
 ];
 
+const TIME_PRESETS: Array<{ mode: TimeFilterMode; label: string }> = [
+  { mode: "all", label: "全部" },
+  { mode: "today", label: "今天" },
+  { mode: "7d", label: "近7天" },
+  { mode: "30d", label: "近1个月" },
+];
+
 export function BoardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [pipelines, setPipelines] = useState<string[]>([]);
   const [pipelinesLoading, setPipelinesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [timeMode, setTimeMode] = useState<TimeFilterMode>("all");
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
   const [form, setForm] = useState({
     repoId: "",
     title: "",
@@ -94,8 +109,23 @@ export function BoardPage() {
     return (id: string) => m.get(id) ?? id;
   }, [repos]);
 
+  const timeRange = useMemo(
+    () => resolveTimeRange(timeMode, rangeFrom, rangeTo),
+    [timeMode, rangeFrom, rangeTo],
+  );
+  const filteredTasks = useMemo(
+    () => tasks.filter((t) => taskMatchesTimeRange(t.created_at, timeRange)),
+    [tasks, timeRange],
+  );
+
   const pipelineOptions =
     form.pipeline && !pipelines.includes(form.pipeline) ? [form.pipeline, ...pipelines] : pipelines;
+
+  const selectPreset = (mode: TimeFilterMode) => {
+    setTimeMode(mode);
+    setRangeFrom("");
+    setRangeTo("");
+  };
 
   const create = async () => {
     setError(null);
@@ -180,9 +210,44 @@ export function BoardPage() {
         </div>
       </div>
 
+      <div className="board-time-filter row">
+        {TIME_PRESETS.map(({ mode, label }) => (
+          <button
+            key={mode}
+            type="button"
+            className={timeMode === mode ? "btn btn-primary" : "btn"}
+            onClick={() => selectPreset(mode)}
+          >
+            {label}
+          </button>
+        ))}
+        <label>
+          从
+          <input
+            type="date"
+            value={rangeFrom}
+            onChange={(e) => {
+              setRangeFrom(e.target.value);
+              setTimeMode("custom");
+            }}
+          />
+        </label>
+        <label>
+          到
+          <input
+            type="date"
+            value={rangeTo}
+            onChange={(e) => {
+              setRangeTo(e.target.value);
+              setTimeMode("custom");
+            }}
+          />
+        </label>
+      </div>
+
       <div className="board">
         {COLUMNS.map((col) => {
-          const items = tasks.filter((t) => col.match.includes(t.status));
+          const items = filteredTasks.filter((t) => col.match.includes(t.status));
           return (
             <section key={col.key} className="board-column">
               <h3>

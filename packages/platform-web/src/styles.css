@@ -420,6 +420,10 @@ label {
 }
 
 /* Board (GitHub Projects) */
+.board-time-filter {
+  margin: 16px 0 12px;
+}
+
 .board {
   display: grid;
   grid-template-columns: repeat(5, minmax(180px, 1fr));
