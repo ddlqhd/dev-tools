@@ -7,6 +7,7 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import WebSocket from "ws";
 import type { InterventionDecision } from "@devtools/shared";
+import { isSafeArtifactId, readTaskArtifact } from "./task-artifacts.js";
 import { buildPlatformTaskDetail } from "./task-detail.js";
 import { listTaskEvents } from "./task-events.js";
 import type { PlatformConfig } from "./config.js";
@@ -252,17 +253,34 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
     "/api/tasks/:id/artifacts/:artifactId",
     async (req, reply) => {
       const task = store.getTask(req.params.id);
-      if (!task?.instance_id || !task.kernel_task_id) {
-        return reply.code(404).send({ error: "not available" });
+      if (!task) return reply.code(404).send({ error: "not found" });
+      if (!isSafeArtifactId(req.params.artifactId)) {
+        return reply.code(400).send({ error: "invalid artifact id" });
       }
-      const inst = store.getInstance(task.instance_id);
-      if (!inst) return reply.code(404).send({ error: "instance gone" });
-      const art = await new KernelClient(inst.endpoint, inst.token).artifact(
-        task.kernel_task_id,
-        req.params.artifactId,
-      );
-      if (!art) return reply.code(404).send({ error: "artifact not found" });
-      return reply.type(art.contentType).send(art.body);
+      const repo = store.getRepo(task.repo_id) ?? null;
+      if (task.instance_id && task.kernel_task_id) {
+        const inst = store.getInstance(task.instance_id);
+        if (inst && inst.status !== "dead") {
+          try {
+            const art = await new KernelClient(inst.endpoint, inst.token).artifact(
+              task.kernel_task_id,
+              req.params.artifactId,
+            );
+            if (art) return reply.type(art.contentType).send(art.body);
+          } catch {
+            // instance idle/dead — try the on-disk artifacts
+          }
+        }
+      }
+      if (repo?.clone_path && task.kernel_task_id) {
+        const art = await readTaskArtifact(
+          repo.clone_path,
+          task.kernel_task_id,
+          req.params.artifactId,
+        );
+        if (art) return reply.type(art.contentType).send(art.body);
+      }
+      return reply.code(404).send({ error: "artifact not found" });
     },
   );
 

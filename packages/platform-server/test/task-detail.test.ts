@@ -84,6 +84,7 @@ test("buildPlatformTaskDetail: completed unbound task still has stages", async (
       .find((n) => n.nodeId === "plan");
     assert.equal(plan?.status, "completed");
     assert.equal(plan?.runCount, 1);
+    assert.equal(detail.artifacts.length, 0);
   } finally {
     store.db.close();
     await rm(tmp, { recursive: true, force: true });
@@ -143,6 +144,69 @@ test("buildPlatformTaskDetail: prefers pipeline.snapshot.yaml over current repo 
     if (detail.workflow.steps[0]!.kind !== "node") throw new Error("expected node");
     assert.equal(detail.workflow.steps[0].node.nodeId, "onlySnap");
     assert.equal(detail.workflow.steps[0].node.status, "pending");
+  } finally {
+    store.db.close();
+    await rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("buildPlatformTaskDetail: lists artifacts from .codeloop/tasks/<id>/artifacts", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "codeloop-detail-"));
+  const store = new PlatformStore(tmp);
+  const repoPath = join(tmp, "repo");
+  try {
+    await mkdir(join(repoPath, ".codeloop", "tasks", "k1", "artifacts"), { recursive: true });
+    await writeFile(join(repoPath, ".codeloop", "tasks", "k1", "artifacts", "planDoc.md"), "# Plan\n");
+    await writeFile(
+      join(repoPath, ".codeloop", "tasks", "k1", "artifacts", "verifyReport.json"),
+      "{}",
+    );
+
+    store.insertRepo({
+      id: "r1",
+      platform: "github",
+      full_name: "o/r",
+      clone_path: repoPath,
+      trigger_label: "ai-dev",
+      max_concurrency: 1,
+      loop_config: null,
+      github_token: null,
+      default_branch: "main",
+      created_at: "2026-08-23T00:00:00.000Z",
+      updated_at: "2026-08-23T00:00:00.000Z",
+    });
+    const task = taskRow();
+    store.insertTask(task);
+    store.insertEvent({
+      task_id: "p1",
+      seq: 1,
+      ts: "2026-08-23T00:00:01.000Z",
+      type: "node.started",
+      payload: JSON.stringify({ nodeId: "plan", primitive: "agent", loopStack: [] }),
+    });
+    store.insertEvent({
+      task_id: "p1",
+      seq: 2,
+      ts: "2026-08-23T00:00:02.000Z",
+      type: "artifact.created",
+      payload: JSON.stringify({ artifactId: "planDoc", key: "planDoc", kind: "md", path: "planDoc.md" }),
+    });
+    store.insertEvent({
+      task_id: "p1",
+      seq: 3,
+      ts: "2026-08-23T00:00:03.000Z",
+      type: "node.completed",
+      payload: JSON.stringify({ nodeId: "plan", outcome: {}, artifactIds: ["planDoc"] }),
+    });
+
+    const detail = await buildPlatformTaskDetail(task, store.getRepo("r1")!, store.listEvents("p1"));
+    assert.equal(detail.artifacts.length, 2);
+    assert.equal(detail.artifacts[0]!.key, "planDoc");
+    assert.equal(detail.artifacts[0]!.ext, "md");
+    assert.equal(detail.artifacts[0]!.producedByNodeId, "plan");
+    assert.equal(detail.artifacts[1]!.key, "verifyReport");
+    assert.equal(detail.artifacts[1]!.ext, "json");
+    assert.equal(detail.stages[0]!.artifacts[0]!.ext, "md");
   } finally {
     store.db.close();
     await rm(tmp, { recursive: true, force: true });

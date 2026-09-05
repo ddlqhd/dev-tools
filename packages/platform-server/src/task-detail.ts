@@ -10,6 +10,7 @@ import {
   type TaskDetail,
 } from "@devtools/shared";
 import type { RepoRow, TaskEventRow, TaskRow } from "./db/store.js";
+import { listTaskArtifacts } from "./task-artifacts.js";
 
 const PIPELINE_CACHE_TTL_MS = 5_000;
 
@@ -24,6 +25,7 @@ export async function buildPlatformTaskDetail(
   events: TaskEventRow[],
 ): Promise<TaskDetail> {
   const graph = await loadPipelineGraph(task.pipeline_name, repo?.clone_path, task.kernel_task_id);
+  const artifacts = await listTaskArtifacts(repo?.clone_path, task.kernel_task_id);
   return buildTaskDetail(
     {
       taskId: task.kernel_task_id ?? task.id,
@@ -45,7 +47,7 @@ export async function buildPlatformTaskDetail(
         branch: task.branch ?? "",
         baseCommit: "",
       },
-      artifacts: [],
+      artifacts,
       pendingIntervention: null,
     },
     parseStoredKernelEvents(events),
