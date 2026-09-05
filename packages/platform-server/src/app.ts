@@ -15,7 +15,7 @@ import { PlatformStore } from "./db/store.js";
 import { purgePlatformTask } from "./delete-task.js";
 import { KernelClient } from "./kernel-client.js";
 import { LocalProcessLauncher } from "./launcher/local.js";
-import { publicInstance, publicRepo } from "./public.js";
+import { publicLiveInstance, publicRepo } from "./public.js";
 import { formatConfigError, getConfigMeta, loadRepoConfig, parseRepoConfig, saveRepoConfig } from "./repo-config.js";
 import { RepoManager } from "./repo-manager.js";
 import { Scheduler } from "./scheduler.js";
@@ -410,7 +410,13 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
   });
 
   app.get("/api/instances", async () => ({
-    instances: store.listInstances().map(publicInstance),
+    instances: store.listLiveInstances().map((row) =>
+      publicLiveInstance(
+        row,
+        row.repo_id ? store.getRepo(row.repo_id) : undefined,
+        store.listTasksOnInstance(row.id),
+      ),
+    ),
   }));
 
   app.post<{ Params: { id: string } }>("/api/instances/:id/terminate", async (req) => {

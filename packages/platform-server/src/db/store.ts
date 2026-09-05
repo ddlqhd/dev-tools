@@ -515,6 +515,26 @@ export class PlatformStore {
       .all() as unknown as InstanceRow[];
   }
 
+  /** Kernels that are still up. Dead rows stay in the table for history. */
+  listLiveInstances(): InstanceRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM instances WHERE status IN ('starting','idle','busy')
+         ORDER BY started_at DESC`,
+      )
+      .all() as unknown as InstanceRow[];
+  }
+
+  listTasksOnInstance(instanceId: string): TaskRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM tasks WHERE instance_id = ?
+         AND status IN ('preparing','running','paused','waiting_human','delivering')
+         ORDER BY updated_at DESC`,
+      )
+      .all(instanceId) as unknown as TaskRow[];
+  }
+
   /**
    * Live kernels for this repo. Busy first so a stale idle row cannot hide
    * the process that still holds `.codeloop/kernel.lock`.

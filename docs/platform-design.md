@@ -298,8 +298,7 @@ POST   /api/tasks/:id/pause|resume|abort
 POST   /api/tasks/:id/instructions
 POST   /api/tasks/:id/interventions/:reqId
 
-# 实时
-# 实例
+# 实例（仅 live：busy/idle/starting；含仓库名与绑定任务）
 GET    /api/instances
 POST   /api/instances/:id/terminate
 
@@ -323,7 +322,7 @@ React + Vite，页面结构：
   - 产物查看：计划文档（markdown 渲染）、评审意见列表（按 severity 分组、逐条状态）、diff 查看器；
   - 介入面板：审批门出现时就地 approve/reject（带意见输入）/edit 确认，任意时刻可注入指令。
 - **仓库管理**：接入仓库、配置触发标签/并发；内核配置（pipeline / 引擎）编辑 clone 上的 `.codeloop/config.yaml`；GitHub App 安装引导。
-- **实例监控**：实例列表（状态/承载任务/心跳），手动回收。
+- **实例监控**：只列运行中的内核（一仓一进程）：仓库、绑定任务、endpoint / pid、心跳；可手动回收。
 
 鉴权第一版做简单方案：控制台账号 + session（内网部署），OIDC/SSO 留作扩展；操作人身份贯穿到 `interventions.decided_by` 审计字段。
 

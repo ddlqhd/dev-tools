@@ -388,6 +388,55 @@ code {
   white-space: nowrap;
 }
 
+.instance-repo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.instance-repo-name {
+  font-weight: 600;
+}
+
+.instance-id {
+  font-size: var(--text-tiny);
+}
+
+.instance-tasks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+}
+
+.instance-task {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.instance-task:hover {
+  text-decoration: none;
+}
+
+.instance-task:hover .instance-task-title {
+  text-decoration: underline;
+}
+
+.instance-task-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
 .empty-state {
   display: grid;
   min-height: 120px;

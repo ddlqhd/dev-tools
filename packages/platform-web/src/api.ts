@@ -89,15 +89,24 @@ export interface Task {
   updated_at: string;
 }
 
+export interface InstanceTask {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  current_node: string | null;
+  branch: string | null;
+}
+
 export interface Instance {
   id: string;
   launcher: string;
-  repo_id: string | null;
   endpoint: string;
   pid: number | null;
   status: string;
   started_at: string;
   last_seen_at: string;
+  repo: { id: string; full_name: string } | null;
+  tasks: InstanceTask[];
 }
 
 export interface TaskEvent {
