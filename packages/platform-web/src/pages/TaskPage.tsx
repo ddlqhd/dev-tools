@@ -343,44 +343,35 @@ export function TaskPage() {
             </div>
             <div className="Box-body">
               {detail && detail.artifacts.length > 0 ? (
-                <>
-                  <div className="table-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>交付件</th>
-                          <th>产出节点</th>
-                          <th>更新时间</th>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>交付件</th>
+                        <th>产出节点</th>
+                        <th>更新时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.artifacts.map((a) => (
+                        <tr key={a.key}>
+                          <td>
+                            <button
+                              className="btn"
+                              type="button"
+                              onClick={() => void loadArtifact(a.key, a.ext)}
+                            >
+                              {a.key}.{a.ext}
+                            </button>{" "}
+                            <span className="muted">{fmtBytes(a.size)}</span>
+                          </td>
+                          <td className="muted">{a.producedByNodeId ?? "—"}</td>
+                          <td className="muted">{fmtClock(a.mtime)}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {detail.artifacts.map((a) => (
-                          <tr key={a.key}>
-                            <td>
-                              <button
-                                className="btn"
-                                type="button"
-                                onClick={() => void loadArtifact(a.key, a.ext)}
-                              >
-                                {a.key}.{a.ext}
-                              </button>{" "}
-                              <span className="muted">{fmtBytes(a.size)}</span>
-                            </td>
-                            <td className="muted">{a.producedByNodeId ?? "—"}</td>
-                            <td className="muted">{fmtClock(a.mtime)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {preview && (
-                    <ArtifactPreview
-                      artifactKey={preview.key}
-                      ext={preview.ext}
-                      text={preview.text}
-                    />
-                  )}
-                </>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
                 <PageState kind="empty" title="暂无交付件" />
               )}
@@ -447,6 +438,34 @@ export function TaskPage() {
           onAct={act}
         />
       </div>
+
+      {preview && (
+        <div className="modal-backdrop" onClick={() => setPreview(null)}>
+          <div
+            className="modal-panel modal-panel--wide Box"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="artifact-preview-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="Box-header">
+              <h2 id="artifact-preview-title">
+                {preview.key}.{preview.ext}
+              </h2>
+              <button className="btn" type="button" onClick={() => setPreview(null)}>
+                关闭
+              </button>
+            </div>
+            <div className="Box-body">
+              <ArtifactPreview
+                artifactKey={preview.key}
+                ext={preview.ext}
+                text={preview.text}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
