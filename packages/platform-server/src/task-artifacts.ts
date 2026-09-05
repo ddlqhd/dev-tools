@@ -45,6 +45,7 @@ export async function listTaskArtifacts(
         ext,
         size: info.size,
         mtime: info.mtime.toISOString(),
+        path: candidate,
       });
     } catch {
       // disappeared mid-listing

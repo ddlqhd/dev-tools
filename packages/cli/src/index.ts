@@ -7,7 +7,7 @@ import {
   createAndRunTask,
   doctor,
   listTasks,
-  getTask,
+  loadTaskDetail,
   listBuiltinPipelines,
   loadPipeline,
   startKernelServer,
@@ -57,7 +57,7 @@ Standard workflow:
   1. codeloop doctor
   2. codeloop run "<requirement>" --repo <path>
   3. codeloop watch <taskId>  (at a gate: review output, then approve or reject)
-  4. codeloop show <taskId>   (final snapshot: branch, artifacts, usage)
+  4. codeloop show <taskId>   (full handover: stages, artifacts with paths, git, usage)
 `,
 );
 
@@ -112,29 +112,46 @@ program
 program
   .command("show")
   .argument("<taskId>")
-  .description("Show task details")
+  .description("Show full task detail (handover snapshot)")
   .option("--repo <path>", "repo path", process.cwd())
-  .addHelpText("after", `
+  .option("--events", "include the full event log in the JSON")
+  .addHelpText(
+    "after",
+    `
 Examples:
   codeloop show <taskId>
-  codeloop show <taskId> --repo /path/to/repo`,)
-  .action(async (taskId: string, opts: { repo: string }) => {
+  codeloop show <taskId> --repo /path/to/repo
+  codeloop show <taskId> --events`,
+  )
+  .action(async (taskId: string, opts: { repo: string; events?: boolean }) => {
     const repo = resolve(opts.repo);
-    const lock = await readKernelLock(repo);
-    if (lock) {
-      const snap = await apiGet(lock, `/tasks/${taskId}`);
-      console.log(JSON.stringify(snap, null, 2));
-      // stderr keeps stdout parseable as JSON
-      const tokenQ = lock.token ? `?token=${encodeURIComponent(lock.token)}` : "";
-      console.error(`trace: http://${lock.host}:${lock.port}/tasks/${taskId}/view${tokenQ}`);
-      return;
-    }
-    const task = getTask(repo, taskId);
-    if (!task) {
-      console.error(`Task not found: ${taskId}`);
+    try {
+      const lock = await readKernelLock(repo);
+      let detail: unknown;
+      let events: unknown[] | undefined;
+      if (lock) {
+        detail = await apiGet(lock, `/tasks/${encodeURIComponent(taskId)}/detail`);
+        if (opts.events) {
+          const body = (await apiGet(
+            lock,
+            `/tasks/${encodeURIComponent(taskId)}/events?after=0`,
+          )) as { events?: unknown[] };
+          events = body.events ?? [];
+        }
+        const tokenQ = lock.token ? `?token=${encodeURIComponent(lock.token)}` : "";
+        console.error(`trace: http://${lock.host}:${lock.port}/tasks/${taskId}/view${tokenQ}`);
+      } else {
+        const loaded = await loadTaskDetail(repo, taskId);
+        detail = loaded.detail;
+        if (opts.events) events = loaded.events;
+      }
+      const out = opts.events ? { ...(detail as object), events } : detail;
+      console.log(JSON.stringify(out, null, 2));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(message.includes("not found") ? `Task not found: ${taskId}` : message);
       process.exit(1);
     }
-    console.log(JSON.stringify(task, null, 2));
   });
 
 program

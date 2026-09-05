@@ -1,6 +1,6 @@
 ---
 name: codeloop-cli
-description: Use when working with the codeloop CLI to create, run, monitor, and control automated AI development tasks. Triggers on codeloop, run task, watch, approve, reject, inject, pause, resume, abort, gate intervention, pipeline. Covers the codeloop command reference, task lifecycle, daemon mode, and the standard run → review → fix → commit workflow.
+description: Use when working with the codeloop CLI to create, run, monitor, and control automated AI development tasks. Triggers on codeloop, run task, watch, show, handover, approve, reject, inject, pause, resume, abort, gate intervention, pipeline. Covers the command reference, task lifecycle, daemon mode, and taking over a failed/running/completed task from its full snapshot.
 ---
 
 # codeloop CLI
@@ -85,12 +85,35 @@ List tasks in the repo: `id  status  pipeline  branch  current_node`.
 ### show
 
 ```bash
-codeloop show <taskId> [--repo <path>]
+codeloop show <taskId> [--repo <path>] [--events]
 ```
 
-Print task detail as pretty JSON on stdout (trace info goes to stderr, so
-stdout stays parseable). Shows current node, loop counters, pipeline, artifacts,
-git state, usage.
+**Handover snapshot.** Same JSON shape whether the task is `running`,
+`suspended`, `failed`, `completed`, or `aborted`, and whether a daemon is
+running. Pretty-print `TaskDetail` on stdout (trace URL goes to stderr).
+
+Always use this — not `watch` — when a human or agent needs to take over.
+
+Key fields:
+
+| Field | Use |
+|---|---|
+| `requirement` / `status` / `currentNode` / `error` | what ran and where it stopped |
+| `paths` | absolute `taskDir`, `artifactsDir`, `eventsPath`, `worktreePath`, `pipelineSnapshot` |
+| `artifacts[]` | deliverables; each has `key`, `ext`, **`path`** (open this file), `producedByNodeId` |
+| `git` | `repoPath`, `worktreePath`, `branch`, `baseCommit`, `head`, `dirty` |
+| `commits[]` | code deliverable SHAs (code lives in the worktree/branch, not `artifacts/`) |
+| `workflow` / `stages[]` | pipeline graph + each node run (outcome, filesChanged, eventRange) |
+| `interventions[]` / `pendingIntervention` | gate history and the waiting request |
+| `usage` | tokens / turns folded from events |
+| `lastSeq` | resume `watch --after` from here |
+
+`--events` adds the raw event log as `events` on the same JSON object (can be
+large). Prefer `artifacts[].path` and `stages` first; pull events only when
+you need a node-level replay.
+
+Typical artifact keys: `planDoc` (`.md`), `planComments` / `reviewComments`
+(`.json`), `verifyReport` (`.json`).
 
 ### run
 
@@ -180,6 +203,24 @@ Start the kernel daemon (control API + event WebSocket). Writes
 `.codeloop/kernel.lock`; other commands then forward to it. Also exposes a
 console UI at `http://host:port/`. Graceful shutdown on SIGINT/SIGTERM.
 
+## Handover / takeover
+
+Use this when any task (failed, in-progress, gated, or done) should continue
+as a human, or as an agent using this skill.
+
+1. `codeloop list --repo <path>` — find `taskId` + status + `current_node`.
+2. `codeloop show <taskId> --repo <path>` — the single source of truth.
+3. Read `artifacts[].path` (plan, review comments, verify report).
+4. Inspect code at `git.worktreePath` on `git.branch` (`commits[]` for SHAs).
+   Do not treat `artifacts/` as the code tree.
+5. Then either:
+   - **Resume automation**: `codeloop resume <taskId> [-m "..."]` (or
+     `approve` / `reject` if `pendingIntervention` is set).
+   - **Take over manually**: work in `paths.worktreePath` using the
+     requirement, plan, and review comments as context.
+
+`show` does not change task state. `watch` is live follow only.
+
 ## Standard workflow
 
 1. `codeloop doctor` — verify engine CLI ready.
@@ -191,12 +232,17 @@ console UI at `http://host:port/`. Graceful shutdown on SIGINT/SIGTERM.
    `codeloop reject <taskId> -m "<review comments>"` to send back for fixes.
 5. If the task pauses or blocks, use `codeloop resume <taskId> [-m ...]` or
    `codeloop inject <taskId> -m ...` to steer it.
-6. `codeloop show <taskId>` for the final snapshot (branch, artifacts, usage).
+6. `codeloop show <taskId>` for the handover snapshot (paths, artifacts, git,
+   stages, usage). Same command for a failed or aborted run.
 
 ## Notes
 
 - Keep stdout parseable: details/logs that are not the primary output go to
-  stderr.
+  stderr. `show` always emits one JSON object (`TaskDetail`, plus `events`
+  when `--events` is set).
+- `show` works without `codeloop serve`: it folds `kernel.db` +
+  `events.jsonl` + `artifacts/` from disk. With a daemon it calls
+  `GET /tasks/:id/detail` and returns the same shape.
 - `autoApproveGates` defaults to `false`; use `--no-gate` for unattended runs.
 - A gate is the `gate` pipeline node (see `codeloop pipelines`); hitting one
   sets the task `suspended` until approved or rejected. Rejecting re-enters

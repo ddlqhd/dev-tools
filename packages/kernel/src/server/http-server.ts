@@ -4,10 +4,11 @@ import { writeFile, readFile, unlink } from "node:fs/promises";
 import { join, resolve as resolvePath, relative, isAbsolute } from "node:path";
 import type { InterventionDecision, KernelEvent } from "@devtools/shared";
 import { KernelRuntime } from "../runtime/kernel-runtime.js";
+import { EventLog } from "../store/index.js";
 import { ensureCodeloopDir } from "../config.js";
 import { renderConsoleHtml } from "./console-html.js";
 import { renderTaskHtml } from "./task-html.js";
-import { buildTaskDetail } from "./task-detail.js";
+import { readTaskDetail } from "./task-detail.js";
 
 const MAX_JSON_BODY_BYTES = 1_000_000;
 
@@ -233,10 +234,12 @@ async function handleHttp(
     const detailMatch = /^\/tasks\/([^/]+)\/detail$/.exec(path);
     if (detailMatch && method === "GET") {
       const taskId = detailMatch[1]!;
-      const snap = await runtime.getSnapshot(taskId);
-      const handle = await runtime.attachTask(taskId);
-      const events = await handle.events.readAfter(0);
-      json(res, 200, buildTaskDetail(snap, events));
+      if (!runtime.store.getTask(taskId)) {
+        json(res, 404, { error: "task not found" });
+        return;
+      }
+      const { detail } = await readTaskDetail(runtime, taskId);
+      json(res, 200, detail);
       return;
     }
 
@@ -298,10 +301,14 @@ async function handleHttp(
 
     const eventsMatch = /^\/tasks\/([^/]+)\/events$/.exec(path);
     if (eventsMatch && method === "GET") {
+      const taskId = eventsMatch[1]!;
+      if (!runtime.store.getTask(taskId)) {
+        json(res, 404, { error: "task not found" });
+        return;
+      }
       const after = Number(url.searchParams.get("after") ?? "0");
-      const handle = await runtime.attachTask(eventsMatch[1]!);
-      const events = await handle.events.readAfter(after);
-      json(res, 200, { events });
+      const log = await EventLog.open(taskId, runtime.store.taskDir(taskId));
+      json(res, 200, { events: await log.readAfter(after) });
       return;
     }
 

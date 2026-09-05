@@ -1,4 +1,5 @@
 export { createAndRunTask, doctor, listTasks, getTask } from "./task.js";
+export { loadTaskDetail, readTaskDetail, buildTaskDetail } from "./server/task-detail.js";
 export type { CreateAndRunOptions, TaskRunResult } from "./task.js";
 export {
   loadConfig,

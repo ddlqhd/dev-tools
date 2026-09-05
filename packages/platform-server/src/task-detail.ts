@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { loadPipeline, parsePipelineYaml } from "@devtools/kernel";
 import {
   buildTaskDetail,
+  inferTaskPaths,
   kernelStatusFromPlatform,
   parseStoredKernelEvents,
   type FlowStep,
@@ -49,6 +50,7 @@ export async function buildPlatformTaskDetail(
       },
       artifacts,
       pendingIntervention: null,
+      paths: inferTaskPaths(repo?.clone_path ?? "", task.kernel_task_id ?? task.id),
     },
     parseStoredKernelEvents(events),
   );

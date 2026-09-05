@@ -203,7 +203,10 @@ test("buildPlatformTaskDetail: lists artifacts from .codeloop/tasks/<id>/artifac
     assert.equal(detail.artifacts.length, 2);
     assert.equal(detail.artifacts[0]!.key, "planDoc");
     assert.equal(detail.artifacts[0]!.ext, "md");
+    assert.equal(detail.artifacts[0]!.path, join(repoPath, ".codeloop", "tasks", "k1", "artifacts", "planDoc.md"));
     assert.equal(detail.artifacts[0]!.producedByNodeId, "plan");
+    assert.equal(detail.paths.taskDir, join(repoPath, ".codeloop", "tasks", "k1"));
+    assert.equal(detail.paths.artifactsDir, join(repoPath, ".codeloop", "tasks", "k1", "artifacts"));
     assert.equal(detail.artifacts[1]!.key, "verifyReport");
     assert.equal(detail.artifacts[1]!.ext, "json");
     assert.equal(detail.stages[0]!.artifacts[0]!.ext, "md");

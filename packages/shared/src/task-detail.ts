@@ -8,9 +8,20 @@ export interface ArtifactFile {
   ext: string;
   size: number;
   mtime: string;
+  /** Absolute path on disk. */
+  path: string;
   /** Last stage that wrote this key, when the event log says so. */
   producedByNodeId?: string;
   producedAt?: string;
+}
+
+/** On-disk layout for a task — enough for an agent to open files without guessing. */
+export interface TaskPaths {
+  taskDir: string;
+  artifactsDir: string;
+  eventsPath: string;
+  worktreePath: string;
+  pipelineSnapshot: string;
 }
 
 export interface StageArtifactRef {
@@ -143,6 +154,7 @@ export interface TaskDetail {
   pendingIntervention?: InterventionRequest | null;
   eventCount: number;
   lastSeq: number;
+  paths: TaskPaths;
 }
 
 /** Inputs needed to fold an event log into {@link TaskDetail}. */
@@ -163,4 +175,23 @@ export interface TaskDetailSource {
   git: TaskDetail["git"];
   artifacts?: ArtifactFile[];
   pendingIntervention?: InterventionRequest | null;
+  paths?: TaskPaths;
+}
+
+/** Derive the standard `.codeloop/tasks/<id>/` layout. Uses `/` — callers on disk should prefer `node:path`. */
+export function inferTaskPaths(
+  repoPath: string,
+  taskId: string,
+  worktreePath = "",
+): TaskPaths {
+  const repo = repoPath.replace(/[\\/]+$/, "");
+  const sep = repo.includes("\\") && !repo.includes("/") ? "\\" : "/";
+  const taskDir = repo && taskId ? [repo, ".codeloop", "tasks", taskId].join(sep) : "";
+  return {
+    taskDir,
+    artifactsDir: taskDir ? `${taskDir}${sep}artifacts` : "",
+    eventsPath: taskDir ? `${taskDir}${sep}events.jsonl` : "",
+    worktreePath,
+    pipelineSnapshot: taskDir ? `${taskDir}${sep}pipeline.snapshot.yaml` : "",
+  };
 }

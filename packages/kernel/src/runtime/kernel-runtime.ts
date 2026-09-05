@@ -8,6 +8,7 @@ import type {
   KernelEvent,
   LoopStackEntry,
   NodeSpec,
+  TaskPaths,
 } from "@devtools/shared";
 import {
   getMissingEngineConfigs,
@@ -81,6 +82,7 @@ export interface TaskSnapshotView {
   git?: { head: string; status: string };
   /** Deliverables on disk under `tasks/<id>/artifacts/`. */
   artifacts: ArtifactFile[];
+  paths: TaskPaths;
 }
 
 type PendingIntervention = {
@@ -748,8 +750,16 @@ export class KernelRuntime {
     }
 
     const artifacts = await this.listArtifacts(taskId);
+    const taskDir = this.store.taskDir(taskId);
+    const paths: TaskPaths = {
+      taskDir,
+      artifactsDir: join(taskDir, "artifacts"),
+      eventsPath: join(taskDir, "events.jsonl"),
+      worktreePath: task.worktree_path,
+      pipelineSnapshot: join(taskDir, "pipeline.snapshot.yaml"),
+    };
 
-    return { task, pipeline, checkpoint, pendingIntervention, git, artifacts };
+    return { task, pipeline, checkpoint, pendingIntervention, git, artifacts, paths };
   }
 
   async listArtifacts(taskId: string): Promise<ArtifactFile[]> {
@@ -772,6 +782,7 @@ export class KernelRuntime {
           ext,
           size: info.size,
           mtime: info.mtime.toISOString(),
+          path: join(dir, name),
         });
       } catch {
         // disappeared mid-listing

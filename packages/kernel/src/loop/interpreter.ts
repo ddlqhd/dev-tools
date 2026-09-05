@@ -187,7 +187,7 @@ export class PipelineInterpreter {
             typeof result.outcome.summary === "string"
               ? result.outcome.summary
               : `${step.nodeId} failed`;
-          await this.opts.artifacts.writeJson(reviewOut, {
+          await this.writeJsonArtifact(reviewOut, {
             passed: false,
             summary,
             comments: failures.map((f, idx) => ({
@@ -224,7 +224,7 @@ export class PipelineInterpreter {
         const outKey =
           (this.opts.pipeline.nodes[reviewNodeId]?.outputs ?? ["planComments"])[0] ??
           "planComments";
-        await this.opts.artifacts.writeJson(outKey, {
+        await this.writeJsonArtifact(outKey, {
           passed: false,
           summary: "Rejected at gate",
           comments: comments.length
@@ -529,6 +529,17 @@ export class PipelineInterpreter {
     });
     this.sessions.set(cacheKey, session);
     return session;
+  }
+
+  private async writeJsonArtifact(key: string, value: unknown): Promise<string> {
+    const saved = await this.opts.artifacts.writeJson(key, value);
+    await this.opts.events.emit("artifact.created", {
+      artifactId: key,
+      key,
+      kind: "json",
+      path: saved,
+    });
+    return saved;
   }
 }
 

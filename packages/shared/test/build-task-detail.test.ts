@@ -135,6 +135,33 @@ test("buildTaskDetail: engine.turn.completed accumulates tokens and turns", () =
   });
 });
 
+test("buildTaskDetail: keeps artifact path and infers task layout paths", () => {
+  const detail = buildTaskDetail(
+    source({
+      artifacts: [
+        {
+          key: "planDoc",
+          ext: "md",
+          size: 12,
+          mtime: "2026-08-23T00:00:02.000Z",
+          path: "/repo/.codeloop/tasks/k1/artifacts/planDoc.md",
+        },
+      ],
+    }),
+    [
+      ev(1, "node.started", { nodeId: "plan", primitive: "agent", loopStack: [] }),
+      ev(2, "artifact.created", { artifactId: "planDoc", key: "planDoc", kind: "md", path: "planDoc.md" }),
+      ev(3, "node.completed", { nodeId: "plan", outcome: {}, artifactIds: ["planDoc"] }),
+    ],
+  );
+  assert.equal(detail.artifacts[0]!.path, "/repo/.codeloop/tasks/k1/artifacts/planDoc.md");
+  assert.equal(detail.artifacts[0]!.producedByNodeId, "plan");
+  assert.equal(detail.paths.taskDir, "/repo/.codeloop/tasks/k1");
+  assert.equal(detail.paths.artifactsDir, "/repo/.codeloop/tasks/k1/artifacts");
+  assert.equal(detail.paths.eventsPath, "/repo/.codeloop/tasks/k1/events.jsonl");
+  assert.equal(detail.paths.worktreePath, "/wt");
+});
+
 test("buildTaskDetail: empty log + flow still yields a pending workflow", () => {
   const detail = buildTaskDetail(
     source({
@@ -172,6 +199,13 @@ function stubDetail(over: Partial<TaskDetail> & Pick<TaskDetail, "workflow" | "s
     usage: { inputTokens: 0, outputTokens: 0, turns: 0 },
     eventCount: 0,
     lastSeq: 0,
+    paths: {
+      taskDir: "/repo/.codeloop/tasks/k1",
+      artifactsDir: "/repo/.codeloop/tasks/k1/artifacts",
+      eventsPath: "/repo/.codeloop/tasks/k1/events.jsonl",
+      worktreePath: "",
+      pipelineSnapshot: "/repo/.codeloop/tasks/k1/pipeline.snapshot.yaml",
+    },
     ...over,
   };
 }

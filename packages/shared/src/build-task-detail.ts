@@ -22,6 +22,7 @@ import type {
   UsageTotals,
   WorkflowView,
 } from "./task-detail.js";
+import { inferTaskPaths } from "./task-detail.js";
 
 /**
  * Fold the append-only event log into per-node stages so a run can be traced
@@ -274,6 +275,9 @@ export function buildTaskDetail(source: TaskDetailSource, events: KernelEvent[])
     pendingIntervention: source.pendingIntervention ?? null,
     eventCount: events.length,
     lastSeq,
+    paths:
+      source.paths ??
+      inferTaskPaths(source.git.repoPath, source.taskId, source.git.worktreePath),
   };
 }
 
