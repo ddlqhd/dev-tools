@@ -8,6 +8,7 @@ export function PageHeader({
   badge,
   meta,
   actions,
+  sticky,
 }: {
   crumb?: { to: string; label: string };
   title: ReactNode;
@@ -15,9 +16,11 @@ export function PageHeader({
   badge?: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
+  /** Pin the title while the rest of the page scrolls, GitHub-issue style. */
+  sticky?: boolean;
 }) {
   return (
-    <header className="page-header">
+    <header className={`page-header${sticky ? " page-header--sticky" : ""}`}>
       {crumb && (
         <nav className="page-crumb" aria-label="面包屑">
           <Link to={crumb.to}>← {crumb.label}</Link>

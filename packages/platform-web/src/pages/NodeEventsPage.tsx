@@ -66,6 +66,7 @@ export function NodeEventsPage() {
   return (
     <div className="page-stack">
       <PageHeader
+        sticky
         crumb={{ to: `/tasks/${id}`, label: task.title }}
         title={nodeId}
         badge={<span className={`State ${stateClass(task.status)}`}>{task.status}</span>}
