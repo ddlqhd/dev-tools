@@ -215,3 +215,46 @@ test("buildPlatformTaskDetail: lists artifacts from .codeloop/tasks/<id>/artifac
     await rm(tmp, { recursive: true, force: true });
   }
 });
+
+test("buildPlatformTaskDetail: worktree comes from task.created", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "codeloop-detail-"));
+  const store = new PlatformStore(tmp);
+  try {
+    store.insertRepo({
+      id: "r1",
+      platform: "github",
+      full_name: "o/r",
+      clone_path: "/repo",
+      trigger_label: "ai-dev",
+      max_concurrency: 1,
+      loop_config: null,
+      github_token: null,
+      default_branch: "main",
+      created_at: "2026-08-23T00:00:00.000Z",
+      updated_at: "2026-08-23T00:00:00.000Z",
+    });
+    const task = taskRow();
+    store.insertTask(task);
+    store.insertEvent({
+      task_id: "p1",
+      seq: 1,
+      ts: "2026-08-23T00:00:01.000Z",
+      type: "task.created",
+      payload: JSON.stringify({
+        requirement: "req",
+        pipeline: { name: "default-codeloop", hash: "abc" },
+        repoPath: "/repo",
+        branch: "codeloop/k1",
+        worktreePath: "/repo/.codeloop/worktrees/k1",
+        inplace: false,
+      }),
+    });
+
+    const detail = await buildPlatformTaskDetail(task, store.getRepo("r1")!, store.listEvents("p1"));
+    assert.equal(detail.git.worktreePath, "/repo/.codeloop/worktrees/k1");
+    assert.equal(detail.paths.worktreePath, "/repo/.codeloop/worktrees/k1");
+  } finally {
+    store.db.close();
+    await rm(tmp, { recursive: true, force: true });
+  }
+});

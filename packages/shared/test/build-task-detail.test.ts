@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildTaskDetail,
+  inferTaskPaths,
   kernelStatusFromPlatform,
   mergeRemoteTaskDetail,
   parseStoredKernelEvents,
@@ -135,6 +136,28 @@ test("buildTaskDetail: engine.turn.completed accumulates tokens and turns", () =
   });
 });
 
+test("buildTaskDetail: fills git.worktreePath from task.created when source omitted it", () => {
+  const detail = buildTaskDetail(
+    source({
+      git: { repoPath: "/repo", worktreePath: "", branch: "", baseCommit: "" },
+      paths: inferTaskPaths("/repo", "k1", ""),
+    }),
+    [
+      ev(1, "task.created", {
+        requirement: "req",
+        pipeline: { name: "default-codeloop", hash: "abc" },
+        repoPath: "/repo",
+        branch: "codeloop/k1",
+        worktreePath: "/repo/.codeloop/worktrees/k1",
+        inplace: false,
+      }),
+    ],
+  );
+  assert.equal(detail.git.worktreePath, "/repo/.codeloop/worktrees/k1");
+  assert.equal(detail.git.branch, "codeloop/k1");
+  assert.equal(detail.paths.worktreePath, "/repo/.codeloop/worktrees/k1");
+});
+
 test("buildTaskDetail: keeps artifact path and infers task layout paths", () => {
   const detail = buildTaskDetail(
     source({
@@ -259,4 +282,23 @@ test("mergeRemoteTaskDetail: attaches fallback workflow when remote omitted it",
   assert.equal(merged.workflow.steps[0]!.kind, "node");
   if (merged.workflow.steps[0]!.kind !== "node") throw new Error("expected node");
   assert.equal(merged.workflow.steps[0].node.nodeId, "plan");
+});
+
+test("mergeRemoteTaskDetail: fills empty worktree from the event-folded fallback", () => {
+  const remote = stubDetail({
+    stages: [],
+    workflow: {
+      name: "p",
+      steps: [{ kind: "node", node: { nodeId: "plan", primitive: "agent", status: "pending", runCount: 0 } }],
+    },
+  });
+  const fallback = stubDetail({
+    stages: [],
+    workflow: { name: "p", steps: [] },
+    git: { repoPath: "/repo", worktreePath: "/wt", branch: "codeloop/k1", baseCommit: "" },
+    paths: { ...stubDetail({ stages: [], workflow: { name: "p", steps: [] } }).paths, worktreePath: "/wt" },
+  });
+  const merged = mergeRemoteTaskDetail(remote, fallback);
+  assert.equal(merged.git.worktreePath, "/wt");
+  assert.equal(merged.paths.worktreePath, "/wt");
 });

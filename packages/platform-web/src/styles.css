@@ -2254,6 +2254,51 @@ label {
   overflow-wrap: anywhere;
 }
 
+.task-copyable {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.task-copyable-value {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-copy-btn {
+  appearance: none;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -1px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.task-copy-btn:hover:not(:disabled) {
+  background: var(--control-transparent-hover);
+  color: var(--fg-default);
+}
+
+.task-copy-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.task-copy-btn:focus-visible {
+  outline: 2px solid var(--accent-emphasis);
+  outline-offset: 1px;
+}
+
 .task-ops-menu {
   position: relative;
   flex-shrink: 0;

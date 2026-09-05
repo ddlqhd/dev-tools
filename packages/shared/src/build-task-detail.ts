@@ -8,6 +8,7 @@ import type {
   NodeCompletedPayload,
   NodeRetryingPayload,
   NodeStartedPayload,
+  TaskCreatedPayload,
 } from "./events.js";
 import type { InterventionRequiredPayload, InterventionResolvedPayload } from "./events.js";
 import { buildWorkflowView } from "./build-workflow.js";
@@ -41,6 +42,7 @@ export function buildTaskDetail(source: TaskDetailSource, events: KernelEvent[])
   let startedAt: string | undefined;
   let endedAt: string | undefined;
   let lastSeq = 0;
+  const git = { ...source.git };
 
   const closeStage = (status: StageStatus, at: string, error?: string): void => {
     if (!current) return;
@@ -56,6 +58,14 @@ export function buildTaskDetail(source: TaskDetailSource, events: KernelEvent[])
     if (current) current.eventRange.to = event.seq;
 
     switch (event.type) {
+      case "task.created": {
+        const p = event.payload as TaskCreatedPayload;
+        if (!git.worktreePath && p.worktreePath) git.worktreePath = p.worktreePath;
+        if (!git.repoPath && p.repoPath) git.repoPath = p.repoPath;
+        if (!git.branch && p.branch) git.branch = p.branch;
+        break;
+      }
+
       case "task.started":
       case "task.resumed": {
         startedAt ??= event.ts;
@@ -266,7 +276,7 @@ export function buildTaskDetail(source: TaskDetailSource, events: KernelEvent[])
       source.pipeline.flow,
       source.pipeline.nodes,
     ),
-    git: source.git,
+    git,
     stages,
     artifacts,
     commits,
@@ -275,9 +285,9 @@ export function buildTaskDetail(source: TaskDetailSource, events: KernelEvent[])
     pendingIntervention: source.pendingIntervention ?? null,
     eventCount: events.length,
     lastSeq,
-    paths:
-      source.paths ??
-      inferTaskPaths(source.git.repoPath, source.taskId, source.git.worktreePath),
+    paths: source.paths
+      ? { ...source.paths, worktreePath: source.paths.worktreePath || git.worktreePath }
+      : inferTaskPaths(git.repoPath, source.taskId, git.worktreePath),
   };
 }
 
@@ -285,13 +295,27 @@ export function buildTaskDetail(source: TaskDetailSource, events: KernelEvent[])
  * Keep a remote fold when it already has a graph or stages.
  * Rebuild only when the payload omitted both (old kernel / empty run).
  */
-export function mergeRemoteTaskDetail<T extends { workflow?: WorkflowView; stages: unknown[] }>(
-  remote: T,
-  fallback: T,
-): T {
-  if (remote.workflow && remote.workflow.steps.length > 0) return remote;
-  if (remote.stages.length > 0) return { ...remote, workflow: fallback.workflow };
-  return fallback;
+export function mergeRemoteTaskDetail<
+  T extends {
+    workflow?: WorkflowView;
+    stages: unknown[];
+    git?: { worktreePath?: string };
+    paths?: { worktreePath?: string };
+  },
+>(remote: T, fallback: T): T {
+  const base =
+    remote.workflow && remote.workflow.steps.length > 0
+      ? remote
+      : remote.stages.length > 0
+        ? { ...remote, workflow: fallback.workflow }
+        : fallback;
+  const worktreePath = base.git?.worktreePath || fallback.git?.worktreePath || "";
+  if (!worktreePath || base.git?.worktreePath === worktreePath) return base;
+  return {
+    ...base,
+    git: base.git ? { ...base.git, worktreePath } : base.git,
+    paths: base.paths ? { ...base.paths, worktreePath } : base.paths,
+  };
 }
 
 /** Parse platform-stored event rows (`payload` is JSON text) into kernel events. */
