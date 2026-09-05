@@ -24,6 +24,14 @@ import { useTaskLive } from "../useTaskLive";
 
 type TaskActions = Record<TaskControlAction, boolean>;
 
+const MENU_ACTIONS = [
+  { key: "pause" as const, label: "暂停", run: (id: string) => api.pause(id) },
+  { key: "resume" as const, label: "继续", run: (id: string) => api.resume(id) },
+  { key: "abort" as const, label: "中止", run: (id: string) => api.abort(id) },
+  { key: "cancel" as const, label: "取消", run: (id: string) => api.cancel(id) },
+  { key: "retry" as const, label: "重试", run: (id: string) => api.retry(id) },
+];
+
 export function TaskPage() {
   const { id = "" } = useParams();
   const { task, repo, kernel, detail, error, setError, reload } = useTaskLive(id);
@@ -88,6 +96,21 @@ export function TaskPage() {
     setPlanError(null);
   }, [id]);
 
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const menus = document.querySelectorAll<HTMLDetailsElement>("details.task-ops-menu[open]");
+      for (const menu of menus) {
+        if (!(event.target instanceof Node) || !menu.contains(event.target)) {
+          menu.open = false;
+        }
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, []);
+
   const act = async (fn: () => Promise<unknown>) => {
     setError(null);
     try {
@@ -120,6 +143,27 @@ export function TaskPage() {
         crumb={{ to: "/", label: "看板" }}
         title={task.title}
         badge={<span className={`State ${stateClass(task.status)}`}>{task.status}</span>}
+        actions={
+          <details className="task-ops-menu">
+            <summary className="btn">操作</summary>
+            <div className="task-ops-menu-panel">
+              {MENU_ACTIONS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  disabled={!actions[item.key]}
+                  onClick={(e) => {
+                    const menu = e.currentTarget.closest("details") as HTMLDetailsElement | null;
+                    if (menu) menu.open = false;
+                    void act(() => item.run(task.id));
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </details>
+        }
       />
 
       {task.error && <StatusBanner kind="error">{task.error}</StatusBanner>}
@@ -469,50 +513,8 @@ function TaskAside({
         {detail?.error && <p className="error">{detail.error}</p>}
       </aside>
 
-      <section className="task-aside-ops" aria-label="任务操作">
-        <h2 className="task-aside-title">操作</h2>
-        <div className="action-bar">
-          <button
-            className="btn"
-            type="button"
-            disabled={!actions.pause}
-            onClick={() => void onAct(() => api.pause(task.id))}
-          >
-            暂停
-          </button>
-          <button
-            className="btn"
-            type="button"
-            disabled={!actions.resume}
-            onClick={() => void onAct(() => api.resume(task.id))}
-          >
-            继续
-          </button>
-          <button
-            className="btn btn-danger"
-            type="button"
-            disabled={!actions.abort}
-            onClick={() => void onAct(() => api.abort(task.id))}
-          >
-            中止
-          </button>
-          <button
-            className="btn"
-            type="button"
-            disabled={!actions.cancel}
-            onClick={() => void onAct(() => api.cancel(task.id))}
-          >
-            取消
-          </button>
-          <button
-            className="btn"
-            type="button"
-            disabled={!actions.retry}
-            onClick={() => void onAct(() => api.retry(task.id))}
-          >
-            重试
-          </button>
-        </div>
+      <section aria-label="注入">
+        <h2 className="task-aside-title">注入</h2>
         <div className="task-inject">
           <input
             placeholder="注入指令…"
