@@ -528,9 +528,6 @@ export function BoardPage() {
           >
             <div className="Box-header">
               <h2 id="delete-task-title">删除任务</h2>
-              <button className="btn" type="button" onClick={closeDelete}>
-                取消
-              </button>
             </div>
             <div className="Box-body">
               <p>

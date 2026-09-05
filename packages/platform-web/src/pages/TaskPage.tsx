@@ -421,9 +421,6 @@ function TaskAside({
       <aside className="task-aside-props" aria-label="任务属性">
         <h2 className="task-aside-title">详情</h2>
         <dl className="task-props">
-          <PropRow label="状态">
-            <span className={`State ${stateClass(task.status)}`}>{task.status}</span>
-          </PropRow>
           {repo && (
             <PropRow label="仓库">
               <span title={repo.full_name}>{repo.full_name}</span>
