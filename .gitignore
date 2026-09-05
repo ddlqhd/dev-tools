@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+# for worktree linking
+node_modules
 .pnpm-store/
 
 # Build outputs
