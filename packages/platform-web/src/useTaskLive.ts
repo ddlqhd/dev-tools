@@ -49,7 +49,9 @@ export function useTaskLive(id: string) {
 
   const reload = useCallback(async () => {
     const info = await api.getTask(id);
-    setTask(info.task);
+    setTask((prev) =>
+      prev && prev.id === info.task.id && prev.updated_at > info.task.updated_at ? prev : info.task,
+    );
     setRepo(info.repo);
     setKernel(info.kernel);
     const ev = await api.listEvents(id);
@@ -80,7 +82,9 @@ export function useTaskLive(id: string) {
       if (msg.type === "task.updated") {
         const t = msg.payload as Task;
         if (t.id === id) {
-          setTask(t);
+          setTask((prev) =>
+            prev && prev.updated_at > t.updated_at ? prev : t,
+          );
           scheduleDetail();
         }
       }

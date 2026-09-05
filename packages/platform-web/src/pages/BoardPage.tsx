@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { boardActionContext, taskActionsEnabled } from "@devtools/shared";
 import { api, connectHub, type Repo, type Task, type TaskStatus } from "../api";
+import { mergeTaskSnapshot, upsertTask } from "../merge-tasks";
 import { stateClass } from "../format";
 import {
   resolveTimeRange,
@@ -88,8 +89,9 @@ export function BoardPage() {
   };
 
   const reload = async () => {
+    const fetchedAt = new Date().toISOString();
     const [t, r] = await Promise.all([api.listTasks(), api.listRepos()]);
-    setTasks(t.tasks);
+    setTasks((prev) => mergeTaskSnapshot(prev, t.tasks, fetchedAt));
     setRepos(r.repos);
     if (!form.repoId && r.repos[0]) {
       setForm((f) => ({ ...f, repoId: r.repos[0]!.id }));
@@ -101,13 +103,7 @@ export function BoardPage() {
     const off = connectHub((msg) => {
       if (msg.type === "task.updated" && msg.payload) {
         const task = msg.payload as Task;
-        setTasks((prev) => {
-          const idx = prev.findIndex((x) => x.id === task.id);
-          if (idx < 0) return [task, ...prev];
-          const next = [...prev];
-          next[idx] = task;
-          return next;
-        });
+        setTasks((prev) => upsertTask(prev, task));
         if (task.status === "waiting_human" && "Notification" in window) {
           if (Notification.permission === "granted") {
             new Notification("codeloop: 需要人工介入", { body: task.title });
@@ -122,6 +118,13 @@ export function BoardPage() {
       }
     });
     return off;
+  }, []);
+
+  useEffect(() => {
+    const tick = setInterval(() => {
+      void reload().catch(() => undefined);
+    }, 4000);
+    return () => clearInterval(tick);
   }, []);
 
   useEffect(() => {
@@ -227,15 +230,15 @@ export function BoardPage() {
   const create = async () => {
     setError(null);
     try {
-      await api.createTask({
+      const created = await api.createTask({
         repoId: form.repoId,
         title: form.title || form.requirement.slice(0, 72),
         requirement: form.requirement,
         pipeline: form.pipeline || undefined,
       });
+      setTasks((prev) => upsertTask(prev, created.task));
       setForm((f) => ({ ...f, title: "", requirement: "" }));
       setCreateOpen(false);
-      await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

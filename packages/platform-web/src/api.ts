@@ -224,16 +224,39 @@ export const api = {
 };
 
 export function connectHub(onMessage: (msg: { type: string; payload: unknown }) => void): () => void {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const token = getPlatformToken();
-  const q = token ? `?token=${encodeURIComponent(token)}` : "";
-  const ws = new WebSocket(`${proto}://${location.host}/api/stream${q}`);
-  ws.onmessage = (ev) => {
-    try {
-      onMessage(JSON.parse(String(ev.data)) as { type: string; payload: unknown });
-    } catch {
-      // ignore
-    }
+  let closed = false;
+  let socket: WebSocket | undefined;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let delayMs = 500;
+
+  const attach = () => {
+    if (closed) return;
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const token = getPlatformToken();
+    const q = token ? `?token=${encodeURIComponent(token)}` : "";
+    const ws = new WebSocket(`${proto}://${location.host}/api/stream${q}`);
+    socket = ws;
+    ws.onmessage = (ev) => {
+      try {
+        onMessage(JSON.parse(String(ev.data)) as { type: string; payload: unknown });
+      } catch {
+        // ignore
+      }
+    };
+    ws.onopen = () => {
+      delayMs = 500;
+    };
+    ws.onclose = () => {
+      if (closed) return;
+      retry = setTimeout(attach, delayMs);
+      delayMs = Math.min(delayMs * 2, 8_000);
+    };
   };
-  return () => ws.close();
+
+  attach();
+  return () => {
+    closed = true;
+    if (retry) clearTimeout(retry);
+    socket?.close();
+  };
 }
