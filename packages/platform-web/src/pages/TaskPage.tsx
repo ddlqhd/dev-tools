@@ -544,14 +544,15 @@ function TaskAside({
         <h2 className="task-aside-title">注入</h2>
         <div className="task-inject">
           <input
-            placeholder="注入指令…"
+            placeholder={actions.inject ? "例如：不要动 legacy/" : "当前无法注入"}
             value={injectText}
+            disabled={!actions.inject}
             onChange={(e) => onInjectText(e.target.value)}
           />
           <button
             className="btn"
             type="button"
-            disabled={!actions.inject}
+            disabled={!actions.inject || !injectText.trim()}
             onClick={() =>
               void onAct(async () => {
                 await api.inject(task.id, injectText);
@@ -562,9 +563,34 @@ function TaskAside({
             注入
           </button>
         </div>
+        <p className="muted task-inject-hint">{injectHint(task.status, actions.inject)}</p>
       </section>
     </div>
   );
+}
+
+function injectHint(status: Task["status"], canInject: boolean): string {
+  if (canInject) return "下一节点生效，不暂停任务。";
+  switch (status) {
+    case "done":
+    case "merged":
+      return "任务已结束，无法再注入指令。";
+    case "failed":
+      return "任务已失败，无法注入。可重试后再注入。";
+    case "cancelled":
+      return "任务已取消，无法注入。可重试后再注入。";
+    case "paused":
+      return "任务已暂停，恢复后再注入。";
+    case "waiting_human":
+      return "请先处理上方审批。";
+    case "delivering":
+      return "正在交付，无法注入。";
+    case "queued":
+    case "preparing":
+      return "任务尚未开始运行，暂不能注入。";
+    default:
+      return "当前状态无法注入指令。";
+  }
 }
 
 function PropRow({ label, children }: { label: string; children: ReactNode }) {

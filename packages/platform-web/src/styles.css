@@ -1541,6 +1541,11 @@ label.board-date-field {
   min-width: 0;
 }
 
+.task-inject-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
 .task-req {
   max-height: 360px;
   overflow: auto;
