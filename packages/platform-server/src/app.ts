@@ -121,7 +121,6 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
       clone_path: clonePath,
       trigger_label: req.body.triggerLabel ?? "ai-dev",
       max_concurrency: req.body.maxConcurrency ?? 1,
-      loop_config: null as string | null,
       github_token: req.body.githubToken ?? null,
       default_branch: req.body.defaultBranch ?? config.defaultBaseBranch,
       created_at: now,

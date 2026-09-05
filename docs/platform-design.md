@@ -36,7 +36,7 @@ flowchart LR
 | 模块 | 职责 |
 |---|---|
 | Platform Adapter | 平台对接：发现 issue、认领、回写评论/状态、创建 PR |
-| RepoManager | 仓库本地缓存：clone/fetch、为任务准备基线 commit、任务完成后推送分支 |
+| RepoManager | 仓库本地缓存：clone/fetch、为任务准备基线 commit、任务完成后推送分支。**不保存**内核配置；配置在 clone 的 `.codeloop/config.yaml` |
 | 调度器 + 任务队列 | 任务入队、并发控制、派发、失败重试、僵尸实例回收 |
 | InstanceLauncher | 拉起/终止内核实例（第一版本地子进程，接口预留容器化） |
 | 进度同步服务 | 订阅所有实例事件流 → 落中心 DB → 推送 Web / 回写平台 |
@@ -68,7 +68,7 @@ L2 状态由内核事件驱动推导（如收到 `intervention.required` 进 Wai
 
 - **队列**：中心 DB 的 `tasks` 表即队列（`status = queued` 按优先级 + 入队时间取），不引入独立 MQ；调度器单实例轮询 + 事件唤醒。
 - **并发控制**：全局最大实例数、按仓库最大并发（默认同仓库串行 = 1，避免分支冲突；同仓库并发时靠 worktree 隔离 + 不同分支）。
-- **派发**：`Preparing` 阶段：RepoManager 确保仓库缓存最新 → Launcher 拉起实例（或复用同仓库空闲实例）→ 调内核 `POST /tasks` 创建任务，记录 `instanceId + kernelTaskId` 映射。
+- **派发**：`Preparing` 阶段：RepoManager 确保 `clone_path` 最新 → 复用该仓已有内核，否则 `codeloop serve --repo <clone>` 拉起（一仓一进程）→ 调内核 `POST /tasks`，记录 `instanceId + kernelTaskId`。内核读该仓 `.codeloop/config.yaml`。
 - **失败与重试**：内核 `task.failed` 按任务的重试策略（默认不自动重试，标记 Failed 等人处理；可配置自动重试 N 次）；实例心跳（事件流断连 + 探活失败超过阈值）视为僵尸，回收进程并将任务置 Failed。
 - **崩溃恢复**：调度器重启后扫描 `Running` 任务，重连实例事件流（用 `seq` 补拉断档事件）；实例已死的，利用内核的 Checkpoint 机制拉起新实例 `resume`。
 
@@ -145,82 +145,123 @@ flowchart LR
 
 issue/PR 评论中 @ 机器人并以 `/codeloop` 开头的命令映射为内核操作：`/codeloop approve`、`/codeloop reject <意见>`、`/codeloop inject <指令>`、`/codeloop abort`。仅限仓库 write 权限成员，其余评论忽略。
 
-## 5. 中心数据库表结构
+## 5. 数据与配置
 
-第一版 SQLite（Drizzle ORM，方言兼容 Postgres，规模上来平滑切换）：
+### 5.1 归属原则
+
+**1 个 platform-server : N 个接入仓库。** Server 启动时不绑定任何 git 仓库；仓库经控制台 `POST /api/repos` 登记。调度时每个仓库最多一个内核进程（`codeloop serve --repo <clone_path>`），可复用。
+
+两套配置、两处状态，不收入同一张表：
+
+| 跟谁走 | 落点 | 内容 |
+|---|---|---|
+| 跟平台 | `platform.config.yaml`（启动解析一份：`--config` → `CODELOOP_PLATFORM_HOME` → 向上找 → `~/.codeloop-platform/`） | 监听、`dataDir` / `reposCache`、调度并发、GitHub/平台 token、`codeloopBin`、默认分支 |
+| 跟平台 | `{dataDir}/platform.db` | 接入清单、任务队列、内核实例、聚合事件、介入审计 |
+| 跟仓库 | `{clone_path}/.codeloop/config.yaml` | pipeline、引擎 / 模型 / prompt、预算、git 前缀、gate / sandbox |
+| 跟仓库 | `{clone_path}/.codeloop/` | `kernel.db`、`events.jsonl`、worktree、任务产物与 pipeline 快照 |
+
+```
+{platform home}/
+  ├── platform.config.yaml          # 跟 server
+  ├── {dataDir}/platform.db         # 跟 server
+  └── {reposCache}/
+        └── owner__name/            # 该仓的 clone
+              └── .codeloop/
+                    ├── config.yaml # 跟仓库
+                    ├── kernel.db
+                    ├── events.jsonl
+                    ├── tasks/<id>/
+                    └── worktrees/
+```
+
+- `repos` 行是**接入记录**（`full_name`、`clone_path`、触发标签、并发、token、默认分支），不是内核配置副本。
+- 控制台 `GET/PUT /api/repos/:id/config` 读写 `clone_path` 上的 yaml；内核 `loadConfig(clone_path)` 读同一份。
+- `.codeloop/` 默认 gitignore：配置在本机 clone，不随远程仓库走；重 clone 会丢，除非另做同步。
+- 平台创建任务时可覆盖个别运行时字段（如 `autoApproveGates: false` 以便控制台审批），不改写仓库 yaml。
+
+内核配置的字段与占位符见 [kernel-design.md §2.5](./kernel-design.md#25-codeloop-配置codeloopconfigyaml)。
+
+### 5.2 中心数据库表结构
+
+第一版 SQLite（`node:sqlite`，`{dataDir}/platform.db`）：
 
 ```sql
--- 接入的仓库及其派发规则
+-- 接入记录与派发规则（不含内核配置）
 CREATE TABLE repos (
-  id            TEXT PRIMARY KEY,
-  platform      TEXT NOT NULL,              -- github | gitlab | gitee
-  full_name     TEXT NOT NULL,              -- owner/name
-  clone_path    TEXT NOT NULL,              -- 本地缓存路径
-  trigger_label TEXT NOT NULL DEFAULT 'ai-dev',
+  id              TEXT PRIMARY KEY,
+  platform        TEXT NOT NULL,              -- github | gitlab | gitee
+  full_name       TEXT NOT NULL,              -- owner/name
+  clone_path      TEXT NOT NULL,              -- 本地 clone
+  trigger_label   TEXT NOT NULL DEFAULT 'ai-dev',
   max_concurrency INTEGER NOT NULL DEFAULT 1,
-  loop_config   TEXT,                       -- 仓库级 codeloop 配置覆盖(JSON)
+  github_token    TEXT,                       -- 可选；缺省用平台级 token
+  default_branch  TEXT NOT NULL DEFAULT 'main',
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
   UNIQUE(platform, full_name)
 );
 
 -- L2 任务(队列即此表)
 CREATE TABLE tasks (
-  id              TEXT PRIMARY KEY,
-  repo_id         TEXT NOT NULL REFERENCES repos(id),
-  source          TEXT NOT NULL,            -- issue | manual
-  issue_number    INTEGER,
-  title           TEXT NOT NULL,
-  requirement     TEXT NOT NULL,            -- 转换后的需求文本
-  status          TEXT NOT NULL,            -- queued|preparing|running|waiting_human|delivering|done|failed|cancelled
-  priority        INTEGER NOT NULL DEFAULT 0,
-  instance_id     TEXT,                     -- 当前承载实例
-  kernel_task_id  TEXT,                     -- 内核侧 taskId
-  branch          TEXT,
-  pr_number       INTEGER,
-  current_node    TEXT,                     -- 透传的内核当前节点(展示用)
-  loop_state      TEXT,                     -- JSON: 各层 loop 计数(如 {"reviewLoop": 2})
-  pipeline_name   TEXT,                     -- 任务使用的 pipeline 模板名 + hash
-  error           TEXT,
-  created_at      TEXT NOT NULL,
-  updated_at      TEXT NOT NULL
+  id                  TEXT PRIMARY KEY,
+  repo_id             TEXT NOT NULL REFERENCES repos(id),
+  source              TEXT NOT NULL,            -- issue | manual | ci-fix
+  issue_number        INTEGER,
+  title               TEXT NOT NULL,
+  requirement         TEXT NOT NULL,
+  status              TEXT NOT NULL,            -- queued|preparing|running|paused|waiting_human|delivering|done|merged|failed|cancelled
+  priority            INTEGER NOT NULL DEFAULT 0,
+  instance_id         TEXT,
+  kernel_task_id      TEXT,                     -- 该 clone 内核侧 taskId
+  branch              TEXT,
+  pr_number           INTEGER,
+  current_node        TEXT,
+  loop_state          TEXT,
+  pipeline_name       TEXT,
+  progress_comment_id TEXT,
+  error               TEXT,
+  retry_count         INTEGER NOT NULL DEFAULT 0,
+  next_retry_at       TEXT,
+  parent_task_id      TEXT,                     -- 派生任务(如 ci-fix)
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
 );
 CREATE INDEX idx_tasks_queue ON tasks(status, priority DESC, created_at);
 
--- 内核实例
+-- 已拉起的内核进程（一仓最多复用一个）
 CREATE TABLE instances (
-  id          TEXT PRIMARY KEY,
-  launcher    TEXT NOT NULL,                -- local-process | docker | ...
-  repo_id     TEXT REFERENCES repos(id),
-  endpoint    TEXT NOT NULL,                -- http://127.0.0.1:port
-  pid         INTEGER,
-  status      TEXT NOT NULL,                -- starting|idle|busy|dead
-  started_at  TEXT NOT NULL,
-  last_seen_at TEXT NOT NULL                -- 心跳
+  id           TEXT PRIMARY KEY,
+  launcher     TEXT NOT NULL,                -- local-process | docker | ...
+  repo_id      TEXT REFERENCES repos(id),
+  endpoint     TEXT NOT NULL,                -- http://127.0.0.1:port
+  token        TEXT,                         -- 该实例的内核 API token
+  pid          INTEGER,
+  status       TEXT NOT NULL,                -- starting|idle|busy|dead
+  started_at   TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
 );
 
--- 聚合的内核事件(节点级)
 CREATE TABLE task_events (
-  task_id     TEXT NOT NULL REFERENCES tasks(id),
-  seq         INTEGER NOT NULL,             -- 内核事件 seq
-  ts          TEXT NOT NULL,
-  type        TEXT NOT NULL,
-  payload     TEXT NOT NULL,                -- JSON
+  task_id  TEXT NOT NULL REFERENCES tasks(id),
+  seq      INTEGER NOT NULL,
+  ts       TEXT NOT NULL,
+  type     TEXT NOT NULL,
+  payload  TEXT NOT NULL,
   PRIMARY KEY (task_id, seq)
 );
 
--- 人工介入审计
 CREATE TABLE interventions (
   id          TEXT PRIMARY KEY,
   task_id     TEXT NOT NULL REFERENCES tasks(id),
-  request_id  TEXT NOT NULL,                -- 内核 intervention requestId
+  request_id  TEXT NOT NULL,
   kind        TEXT NOT NULL,                -- gate | limit | error | manual
-  decision    TEXT,                         -- JSON: approve/reject/edit/inject...
-  decided_by  TEXT,                         -- 控制台用户 / 平台用户名
+  decision    TEXT,
+  decided_by  TEXT,
   channel     TEXT NOT NULL,                -- web | cli | platform-comment
   created_at  TEXT NOT NULL,
   decided_at  TEXT
 );
 
--- 用量统计(从 engine.turn.completed 聚合)
 CREATE TABLE usage_records (
   task_id       TEXT NOT NULL REFERENCES tasks(id),
   stage         TEXT NOT NULL,
@@ -235,21 +276,32 @@ CREATE TABLE usage_records (
 ## 6. 管理 API（控制台契约）
 
 ```
-# 仓库接入
+# 仓库接入（DB 接入记录）
 GET/POST/PATCH /api/repos
+
+# 仓库内核配置（读写 clone 上的 .codeloop/config.yaml，不进 DB）
+GET/PUT /api/repos/:id/config
+GET     /api/config/meta                   # 内置 pipeline / 可用引擎
 
 # 任务
 GET    /api/tasks?status=&repo=            # 列表(看板)
 POST   /api/tasks                          # 手工创建(不经 issue)
-GET    /api/tasks/:id                      # 详情: L2 状态 + 内核快照(代理内核 GET /tasks/:id)
-GET    /api/tasks/:id/events?after=        # 历史事件
-GET    /api/tasks/:id/artifacts/:artifactId # 代理内核产物(计划/评审/diff)
+GET    /api/tasks/:id                      # 详情: L2 状态 + 内核快照
+GET    /api/tasks/:id/detail
+GET    /api/tasks/:id/events?after=        # 历史事件(实例不在则读 clone 磁盘)
+GET    /api/tasks/:id/artifacts/:artifactId # 产物(优先代理内核，否则读 clone)
+DELETE /api/tasks/:id
 POST   /api/tasks/:id/retry|cancel
 
 # 人工介入(转发内核, 见 4.2)
 POST   /api/tasks/:id/pause|resume|abort
 POST   /api/tasks/:id/instructions
 POST   /api/tasks/:id/interventions/:reqId
+
+# 实时
+# 实例
+GET    /api/instances
+POST   /api/instances/:id/terminate
 
 # 实时
 WS     /api/stream                         # 全局: 任务状态变化 + 介入请求(看板/通知用)
@@ -270,7 +322,7 @@ React + Vite，页面结构：
   - 实时活动流：verbose 事件渲染（引擎正在做什么、改了哪些文件）；
   - 产物查看：计划文档（markdown 渲染）、评审意见列表（按 severity 分组、逐条状态）、diff 查看器；
   - 介入面板：审批门出现时就地 approve/reject（带意见输入）/edit 确认，任意时刻可注入指令。
-- **仓库管理**：接入仓库、配置触发标签/并发/codeloop 覆盖配置、GitHub App 安装引导。
+- **仓库管理**：接入仓库、配置触发标签/并发；内核配置（pipeline / 引擎）编辑 clone 上的 `.codeloop/config.yaml`；GitHub App 安装引导。
 - **实例监控**：实例列表（状态/承载任务/心跳），手动回收。
 
 鉴权第一版做简单方案：控制台账号 + session（内网部署），OIDC/SSO 留作扩展；操作人身份贯穿到 `interventions.decided_by` 审计字段。

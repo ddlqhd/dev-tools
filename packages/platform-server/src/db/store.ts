@@ -9,7 +9,6 @@ export interface RepoRow {
   clone_path: string;
   trigger_label: string;
   max_concurrency: number;
-  loop_config: string | null;
   github_token: string | null;
   default_branch: string;
   created_at: string;
@@ -77,7 +76,6 @@ export class PlatformStore {
         clone_path TEXT NOT NULL,
         trigger_label TEXT NOT NULL DEFAULT 'ai-dev',
         max_concurrency INTEGER NOT NULL DEFAULT 1,
-        loop_config TEXT,
         github_token TEXT,
         default_branch TEXT NOT NULL DEFAULT 'main',
         created_at TEXT NOT NULL,
@@ -152,21 +150,31 @@ export class PlatformStore {
     this.migrate();
   }
 
-  /** Additive column migrations for databases created before the fields existed. */
+  /** Schema migrations for databases created before the current layout. */
   private migrate(): void {
-    const cols = new Set(
+    const taskCols = new Set(
       (this.db.prepare(`PRAGMA table_info(tasks)`).all() as Array<{ name: string }>).map(
         (c) => c.name,
       ),
     );
-    if (!cols.has("retry_count")) {
+    if (!taskCols.has("retry_count")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
     }
-    if (!cols.has("next_retry_at")) {
+    if (!taskCols.has("next_retry_at")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN next_retry_at TEXT`);
     }
-    if (!cols.has("parent_task_id")) {
+    if (!taskCols.has("parent_task_id")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT`);
+    }
+
+    const repoCols = new Set(
+      (this.db.prepare(`PRAGMA table_info(repos)`).all() as Array<{ name: string }>).map(
+        (c) => c.name,
+      ),
+    );
+    // Kernel config lives in `{clone}/.codeloop/config.yaml`, not the platform DB.
+    if (repoCols.has("loop_config")) {
+      this.db.exec(`ALTER TABLE repos DROP COLUMN loop_config`);
     }
   }
 
@@ -180,8 +188,8 @@ export class PlatformStore {
       .prepare(
         `INSERT INTO repos (
           id, platform, full_name, clone_path, trigger_label, max_concurrency,
-          loop_config, github_token, default_branch, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          github_token, default_branch, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         row.id,
@@ -190,7 +198,6 @@ export class PlatformStore {
         row.clone_path,
         row.trigger_label,
         row.max_concurrency,
-        row.loop_config,
         row.github_token,
         row.default_branch,
         row.created_at,
@@ -206,7 +213,6 @@ export class PlatformStore {
         | "clone_path"
         | "trigger_label"
         | "max_concurrency"
-        | "loop_config"
         | "github_token"
         | "default_branch"
       >
@@ -221,13 +227,12 @@ export class PlatformStore {
     this.db
       .prepare(
         `UPDATE repos SET clone_path=?, trigger_label=?, max_concurrency=?,
-         loop_config=?, github_token=?, default_branch=?, updated_at=? WHERE id=?`,
+         github_token=?, default_branch=?, updated_at=? WHERE id=?`,
       )
       .run(
         next.clone_path,
         next.trigger_label,
         next.max_concurrency,
-        next.loop_config,
         next.github_token,
         next.default_branch,
         next.updated_at,

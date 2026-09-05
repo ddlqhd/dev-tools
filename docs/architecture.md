@@ -100,7 +100,8 @@ flowchart TB
 | 流程 | 单任务 codeloop pipeline（可编排） | 多任务排队、并发控制、失败重试 |
 | git | worktree/分支内的 commit | clone 仓库、推送分支、创建 PR |
 | 人工介入 | 检查点暂停、审批门、指令注入 | 把介入入口透出到 Web 控制台，转发给对应实例 |
-| 状态存储 | 本地 SQLite + JSONL（单任务） | 中心 DB（全局任务/实例/事件聚合） |
+| 配置 | 每仓库一份 `.codeloop/config.yaml` | 每 server 一份 `platform.config.yaml` |
+| 状态存储 | 仓库旁 `.codeloop/`（SQLite + JSONL + 产物） | 中心 DB（接入清单 / 队列 / 实例 / 聚合事件） |
 | 可观测 | CLI 实时渲染 + HTTP/WS 事件流 | 控制台看板 + 平台 issue/PR 评论 |
 
 ### 3.2 内核对外协议（两层之间的契约）
@@ -111,7 +112,20 @@ flowchart TB
 2. **事件流（WebSocket / SSE）**：节点转换、循环轮次、引擎输出、diff 产生、审批请求等结构化事件，支持断线后按序号重放；
 3. **状态查询（HTTP）**：任务快照（pipeline 定义、当前节点、循环轮次、产物列表、git 状态）。
 
-协议的具体定义（事件类型、payload 结构）见 [kernel-design.md 第 6 节](./kernel-design.md#6-事件协议)。管理系统只依赖这三个接口，不触碰内核的本地存储和 worktree。
+协议的具体定义（事件类型、payload 结构）见 [kernel-design.md 第 6 节](./kernel-design.md#6-事件协议)。管理系统是内核的调用方：派发与介入走上述接口；仓库配置、产物、事件历史则以该仓库 clone 上的 `.codeloop/` 为源，平台 DB **不存副本**。
+
+### 3.3 配置与数据归属
+
+**1 个 platform-server : N 个接入仓库。** Server 启动不绑定任何 git 仓库；仓库运行时登记。每个仓库最多复用一个 `codeloop serve --repo <clone>`。
+
+| 跟谁走 | 落点 | 内容 |
+|---|---|---|
+| 跟平台 | `platform.config.yaml` | 监听、`dataDir` / `reposCache`、调度并发、GitHub/平台 token、`codeloopBin` |
+| 跟平台 | `{dataDir}/platform.db` | 接入了哪些仓、任务队列、内核实例、聚合事件 |
+| 跟仓库 | `{clone}/.codeloop/config.yaml` | pipeline、引擎 / 模型 / prompt、预算、git 前缀 |
+| 跟仓库 | `{clone}/.codeloop/` | `kernel.db`、`events.jsonl`、worktree、任务产物 |
+
+原则：平台问「管哪些仓、任务排到谁」；仓库问「这个仓怎么跑任务」。两套源各写各的，不收入同一张表。控制台改内核配置只是写回 clone 上的 yaml。`.codeloop/` 默认 gitignore，配置在本机 clone，不随远程仓库走。细节见 [platform-design.md 第 5 节](./platform-design.md#5-数据与配置)。
 
 ## 4. 核心数据流
 
@@ -195,7 +209,7 @@ dev-tools/
 按使用规模递进，三种形态使用同一套代码。对外分发为**单个** tarball `@devtools/codeloop`（GitHub Release 附件，暂不推 registry），装一次得到两个命令：
 
 1. **单机个人模式**：`npm i -g ./devtools-codeloop-*.tgz` 后用 `codeloop`。`codeloop run` 直接在当前仓库工作，SQLite + JSONL 落在 `.codeloop/` 目录。无任何服务。
-2. **单机团队模式**：同一安装包用 `codeloop-platform` 起管理系统（后端 + 内嵌前端）。内核实例作为**本地子进程**由调度器拉起（每实例一个 worktree），中心 DB 用 SQLite；平台配置/数据默认落在 `~/.codeloop-platform/`。适合小团队 / 内网。
+2. **单机团队模式**：同一安装包用 `codeloop-platform` 起管理系统（后端 + 内嵌前端）。内核实例作为**本地子进程**由调度器按仓库拉起（一仓一 `codeloop serve`，每任务一个 worktree）。平台配置与 `platform.db` 默认落在 `~/.codeloop-platform/`（或仓库内 `platform.config.yaml`）；各仓的内核配置与任务数据仍在各自 clone 的 `.codeloop/`。适合小团队 / 内网。
 3. **容器化模式（扩展点，第一版不实现）**：调度器的实例启动器抽象为 `InstanceLauncher` 接口，第一版实现 `LocalProcessLauncher`，后续增加 `DockerLauncher` / `K8sLauncher`，把每个内核实例连同 Agent CLI 打进容器，实现资源隔离与横向扩展。
 
 ## 7. 安全与资源边界

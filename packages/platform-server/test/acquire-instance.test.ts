@@ -22,7 +22,6 @@ async function withStore(fn: (store: PlatformStore) => Promise<void>): Promise<v
       clone_path: "/tmp/x",
       trigger_label: "ai-dev",
       max_concurrency: 10,
-      loop_config: null,
       github_token: null,
       default_branch: "main",
       created_at: new Date().toISOString(),

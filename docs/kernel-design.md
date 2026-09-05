@@ -172,6 +172,8 @@ export interface NodeResult {
 
 ### 2.5 codeloop 配置（`.codeloop/config.yaml`）
 
+这份文件**跟目标仓库走**：路径为 `{repo}/.codeloop/config.yaml`（该目录 gitignore）。每个仓库一份，CLI `--repo` 与 `codeloop serve --repo` 都读这一份。L2 控制台 `GET/PUT /api/repos/:id/config` 也是读写同一文件，**不在平台 DB 里存副本**。平台自己的监听 / 调度 / token 在 `platform.config.yaml`，见 [platform-design.md 第 5 节](./platform-design.md#5-数据与配置)。
+
 配置负责选择 pipeline 并提供运行环境（引擎、预算、git），流程形状全部在 pipeline 定义中。阶段别名同时选定模型和提示词：`engines.<alias>.prompt` 是发给该阶段的正文，占位符为 `{{requirement}}` / `{{planDoc}}` / `{{instructions}}` 等；缺省或空字符串回退到内置默认正文。初始化 `.codeloop/config.yaml` 时写入默认模板，已有配置只补缺失的 `prompt`、不覆盖已编辑的正文。
 
 ```yaml
@@ -375,7 +377,7 @@ commit 由引擎执行 git 操作（读 diff、自拟 message、`reset --soft` +
 
 ## 5. 持久化与目录布局
 
-任务数据全部落在仓库旁的 `.codeloop/` 下（gitignore）：
+任务数据全部落在**该仓库旁**的 `.codeloop/` 下（gitignore）。平台侧只登记 `clone_path`，不把下面这些文件镜像进 `platform.db`：
 
 ```
 .codeloop/

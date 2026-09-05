@@ -48,12 +48,14 @@ pnpm platform:server
 pnpm platform:web
 ```
 
-配置见根目录 [`platform.config.yaml`](platform.config.yaml)（仓库内存在该文件时优先用它）：
+平台配置跟 server 走，见 [`platform.config.yaml`](platform.config.yaml)（仓库内存在该文件时优先用它）：
 
 - `GITHUB_TOKEN` — 可选；用于 poll issue / 推分支 / 开 PR
 - `GITHUB_WEBHOOK_SECRET` — 生产环境建议设置；验签使用原始请求体
 - `PLATFORM_TOKEN` — 可选；设置后 `/api/*` 需 Bearer（控制台：`localStorage.platformToken` 或构建时 `VITE_PLATFORM_TOKEN`；WebSocket 用 `?token=`）
 - `codeloopBin` — 拉起内核的命令（开发配置指向本仓 CLI；发布态省略则用包内 CLI）
+
+接入的每个代码库另有一份内核配置：`{clone}/.codeloop/config.yaml`（pipeline / 引擎 / 预算）。控制台「设置」改的是这份文件，不写入平台 DB。数据归属见 [`docs/platform-design.md`](docs/platform-design.md#5-数据与配置)。
 
 典型流程：
 

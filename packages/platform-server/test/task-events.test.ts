@@ -39,7 +39,6 @@ test("listTaskEvents: reads engine.chunk from kernel events.jsonl", async () => 
       clone_path: repoPath,
       trigger_label: "ai-dev",
       max_concurrency: 1,
-      loop_config: null,
       github_token: null,
       default_branch: "main",
       created_at: "2026-09-02T00:00:00.000Z",

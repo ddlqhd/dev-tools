@@ -43,7 +43,6 @@ test("paused does not consume repo concurrency; holds instance occupancy", async
       clone_path: "/tmp/x",
       trigger_label: "ai-dev",
       max_concurrency: 1,
-      loop_config: null,
       github_token: null,
       default_branch: "main",
       created_at: now,
