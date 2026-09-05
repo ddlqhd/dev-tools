@@ -458,6 +458,25 @@ code {
   background: var(--canvas-subtle);
 }
 
+.settings-nav-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-nav-group + .settings-nav-group {
+  border-top: 1px solid var(--border-default);
+}
+
+.settings-nav-heading {
+  margin: 0;
+  padding: 10px 16px 4px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 16px;
+}
+
 .settings-sidenav a {
   position: relative;
   display: flex;
@@ -471,7 +490,7 @@ code {
   line-height: 20px;
 }
 
-.settings-sidenav a:last-child {
+.settings-nav-group a:last-child {
   border-bottom: 0;
 }
 
@@ -537,6 +556,24 @@ label.settings-repo-pick {
     display: none;
   }
 
+  .settings-nav-group {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .settings-nav-group + .settings-nav-group {
+    border-top: 0;
+    border-left: 1px solid var(--border-default);
+  }
+
+  .settings-nav-heading {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-right: 1px solid var(--border-muted);
+    white-space: nowrap;
+  }
+
   .settings-sidenav a {
     flex: 0 0 auto;
     border-bottom: 0;
@@ -544,7 +581,7 @@ label.settings-repo-pick {
     white-space: nowrap;
   }
 
-  .settings-sidenav a:last-child {
+  .settings-nav-group a:last-child {
     border-right: 0;
   }
 

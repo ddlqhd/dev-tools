@@ -597,7 +597,7 @@ export function BoardPage() {
               {formError && <p className="error">{formError}</p>}
               {!repos.length && (
                 <p className="muted">
-                  还没有仓库，先到 <Link to="/settings/repos">配置 → 仓库</Link>{" "}
+                  还没有仓库，先到 <Link to="/settings/repos">配置 → 平台配置 → 仓库</Link>{" "}
                   接入本地或 GitHub 仓库。
                 </p>
               )}

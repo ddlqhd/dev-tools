@@ -15,38 +15,52 @@ const STAGE_ALIASES = [
   { key: "committer", label: "提交" },
 ] as const;
 
-const SETTINGS_SECTIONS = [
+const SETTINGS_GROUPS = [
   {
-    id: "repos",
-    label: "仓库",
-    title: "仓库",
-    description: "接入本地目录或 GitHub 仓库后即可创建任务。",
+    id: "platform",
+    label: "平台配置",
+    sections: [
+      {
+        id: "repos",
+        label: "仓库",
+        title: "仓库",
+        description: "接入本地目录或 GitHub 仓库后即可创建任务。写入平台 DB，不进仓库 yaml。",
+      },
+    ],
   },
   {
-    id: "pipeline",
-    label: "流水线",
-    title: "流水线",
-    description: "默认 pipeline 与门禁行为，只影响之后新建的任务。",
-  },
-  {
-    id: "workspace",
-    label: "工作区",
-    title: "工作区",
-    description: "Worktree / Inplace 与分支命名。",
-  },
-  {
-    id: "agents",
-    label: "智能体",
-    title: "智能体",
-    description: "各阶段使用的引擎与模型。",
-  },
-  {
-    id: "budget",
-    label: "预算",
-    title: "预算",
-    description: "引擎调用次数与节点超时。",
+    id: "repo",
+    label: "仓库配置",
+    sections: [
+      {
+        id: "pipeline",
+        label: "流水线",
+        title: "流水线",
+        description: "默认 pipeline 与门禁行为，只影响之后新建的任务。",
+      },
+      {
+        id: "workspace",
+        label: "工作区",
+        title: "工作区",
+        description: "Worktree / Inplace 与分支命名。",
+      },
+      {
+        id: "agents",
+        label: "智能体",
+        title: "智能体",
+        description: "各阶段使用的引擎与模型。",
+      },
+      {
+        id: "budget",
+        label: "预算",
+        title: "预算",
+        description: "引擎调用次数与节点超时。",
+      },
+    ],
   },
 ] as const;
+
+const SETTINGS_SECTIONS = SETTINGS_GROUPS.flatMap((group) => [...group.sections]);
 
 type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
@@ -227,17 +241,22 @@ export function SettingsPage() {
   return (
     <div className="settings-layout">
       <nav className="settings-sidenav" aria-label="配置分组">
-        {SETTINGS_SECTIONS.map((item) => (
-          <NavLink
-            key={item.id}
-            to={sectionHref(item.id, repoId)}
-            className={({ isActive }) => (isActive ? "active" : undefined)}
-          >
-            <span>{item.label}</span>
-            {item.id === "repos" && repos.length > 0 && (
-              <span className="Counter">{repos.length}</span>
-            )}
-          </NavLink>
+        {SETTINGS_GROUPS.map((group) => (
+          <div key={group.id} className="settings-nav-group">
+            <h2 className="settings-nav-heading">{group.label}</h2>
+            {group.sections.map((item) => (
+              <NavLink
+                key={item.id}
+                to={sectionHref(item.id, repoId)}
+                className={({ isActive }) => (isActive ? "active" : undefined)}
+              >
+                <span>{item.label}</span>
+                {item.id === "repos" && repos.length > 0 && (
+                  <span className="Counter">{repos.length}</span>
+                )}
+              </NavLink>
+            ))}
+          </div>
         ))}
       </nav>
 
