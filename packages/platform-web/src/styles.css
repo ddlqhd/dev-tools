@@ -957,6 +957,24 @@ label {
   justify-content: space-between;
 }
 
+.modal-panel--wide {
+  max-width: 960px;
+  max-height: min(90vh, 900px);
+}
+
+.modal-panel--wide .artifact-preview,
+.modal-panel--wide pre.artifact {
+  max-height: none;
+}
+
+.modal-panel--wide .artifact-preview-kicker {
+  display: none;
+}
+
+.modal-panel--wide .artifact-preview-toolbar:not(:has(.artifact-view-toggle)) {
+  display: none;
+}
+
 /* Board (GitHub Projects) */
 .board-filterbar {
   display: flex;
