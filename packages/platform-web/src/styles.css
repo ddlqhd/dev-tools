@@ -365,6 +365,124 @@ code {
   }
 }
 
+/* Settings: GitHub Insights-style side nav + content */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  min-width: 0;
+}
+
+.settings-sidenav {
+  position: sticky;
+  top: 112px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--canvas-subtle);
+}
+
+.settings-sidenav a {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-muted);
+  color: var(--fg-default);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.settings-sidenav a:last-child {
+  border-bottom: 0;
+}
+
+.settings-sidenav a:hover {
+  background: var(--control-transparent-hover);
+  text-decoration: none;
+}
+
+.settings-sidenav a.active {
+  background: var(--control-transparent-hover);
+  font-weight: 600;
+}
+
+.settings-sidenav a.active::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: var(--underline-nav-active);
+}
+
+.settings-main {
+  min-width: 0;
+}
+
+.settings-main > .page-header {
+  margin-bottom: 16px;
+}
+
+.settings-main > .page-stack,
+.settings-main > .Box {
+  margin-bottom: 0;
+}
+
+.settings-main > .Box > .page-state {
+  min-height: 96px;
+  border: 0;
+  background: transparent;
+}
+
+label.settings-repo-pick {
+  flex: 0 1 280px;
+  min-width: 180px;
+}
+
+@media (max-width: 800px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .settings-sidenav {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .settings-sidenav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .settings-sidenav a {
+    flex: 0 0 auto;
+    border-bottom: 0;
+    border-right: 1px solid var(--border-muted);
+    white-space: nowrap;
+  }
+
+  .settings-sidenav a:last-child {
+    border-right: 0;
+  }
+
+  .settings-sidenav a.active::before {
+    top: auto;
+    right: 0;
+    width: auto;
+    height: 2px;
+  }
+}
+
 @media (max-width: 760px) {
   .page-heading {
     flex-direction: column;
@@ -610,6 +728,7 @@ code {
 
 .Header-logo:focus-visible,
 .Header-link:focus-visible,
+.settings-sidenav a:focus-visible,
 .theme-toggle button:focus-visible,
 .btn:focus-visible,
 .page-crumb a:focus-visible,

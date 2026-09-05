@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { PageHeader } from "../components/PageHeader";
 import { PageState, StatusBanner } from "../components/PageState";
 import { api, type Repo } from "../api";
 
@@ -11,7 +10,7 @@ type EditForm = {
   githubToken: string;
 };
 
-export function ReposPage() {
+export function ReposPage({ onReposChange }: { onReposChange?: (repos: Repo[]) => void } = {}) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -25,7 +24,11 @@ export function ReposPage() {
     defaultBranch: "main",
   });
 
-  const reload = () => api.listRepos().then((r) => setRepos(r.repos));
+  const reload = () =>
+    api.listRepos().then((r) => {
+      setRepos(r.repos);
+      onReposChange?.(r.repos);
+    });
 
   useEffect(() => {
     void reload().catch((e: Error) => setError(e.message));
@@ -91,17 +94,6 @@ export function ReposPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title="仓库"
-        description={
-          <>
-            <span>{repos.length} 个已接入</span>
-            <span aria-hidden="true"> · </span>
-            <span>接入本地目录或 GitHub 仓库后即可创建任务</span>
-          </>
-        }
-      />
-
       {error && !editingId && <StatusBanner kind="error">{error}</StatusBanner>}
 
       <div className="Box">

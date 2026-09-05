@@ -513,7 +513,10 @@ export function BoardPage() {
               {pipelinesLoading && <p className="muted">加载 Pipeline…</p>}
               {error && <p className="error">{error}</p>}
               {!repos.length && (
-                <p className="muted">还没有仓库，先去「仓库」页接入本地或 GitHub 仓库。</p>
+                <p className="muted">
+                  还没有仓库，先到 <Link to="/settings/repos">配置 → 仓库</Link>{" "}
+                  接入本地或 GitHub 仓库。
+                </p>
               )}
             </div>
           </div>

@@ -1,9 +1,8 @@
 import type { ReactElement } from "react";
-import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { BoardPage } from "./pages/BoardPage";
 import { TaskPage } from "./pages/TaskPage";
 import { NodeEventsPage } from "./pages/NodeEventsPage";
-import { ReposPage } from "./pages/ReposPage";
 import { InstancesPage } from "./pages/InstancesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { useTheme, type ThemeChoice } from "./theme";
@@ -31,24 +30,6 @@ function BoardIcon() {
       <rect x="1.5" y="2" width="3.5" height="12" rx="1" stroke="currentColor" />
       <rect x="6.25" y="2" width="3.5" height="8" rx="1" stroke="currentColor" />
       <rect x="11" y="2" width="3.5" height="10" rx="1" stroke="currentColor" />
-    </svg>
-  );
-}
-
-function RepoIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M1.5 4.25h4.25l1.4 1.5h7.35v6.5A1.25 1.25 0 0 1 13.25 13.5H2.75A1.25 1.25 0 0 1 1.5 12.25Z" />
-      <path d="M1.5 4.25V3.5A1.25 1.25 0 0 1 2.75 2.25H6l1.25 1.5h6A1.25 1.25 0 0 1 14.5 5" />
     </svg>
   );
 }
@@ -120,7 +101,6 @@ const NAV_ITEMS: Array<{
   icon: () => ReactElement;
 }> = [
   { to: "/", label: "看板", icon: BoardIcon },
-  { to: "/repos", label: "仓库", icon: RepoIcon },
   { to: "/instances", label: "实例", icon: InstancesIcon },
   { to: "/settings", label: "配置", icon: SettingsIcon },
 ];
@@ -197,9 +177,10 @@ export function App() {
           <Route path="/" element={<BoardPage />} />
           <Route path="/tasks/:id" element={<TaskPage />} />
           <Route path="/tasks/:id/nodes/:nodeId" element={<NodeEventsPage />} />
-          <Route path="/repos" element={<ReposPage />} />
+          <Route path="/repos" element={<Navigate to="/settings/repos" replace />} />
           <Route path="/instances" element={<InstancesPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={<Navigate to="/settings/repos" replace />} />
+          <Route path="/settings/:section" element={<SettingsPage />} />
         </Routes>
       </main>
     </>
