@@ -1149,6 +1149,7 @@ label.board-date-field {
 }
 
 .board-card {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 4px;
@@ -1166,10 +1167,15 @@ label.board-date-field {
 }
 
 .board-card:hover {
+  z-index: 2;
   border-color: var(--accent-fg);
   box-shadow: var(--shadow-medium);
   transform: translateY(-1px);
   text-decoration: none;
+}
+
+.board-card:has(> .board-card-menu[open]) {
+  z-index: 5;
 }
 
 .board-card-main {
