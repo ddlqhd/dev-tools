@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   buildWorkflowView,
   countWorkflowNodes,
@@ -9,7 +9,11 @@ import {
 import { ArtifactPreview } from "../components/ArtifactPreview";
 import { Markdown } from "../components/Markdown";
 import { PageHeader } from "../components/PageHeader";
-import { PageState, StatusBanner } from "../components/PageState";
+import { PageState, Skeleton, StatusBanner } from "../components/PageState";
+import { useToast } from "../components/Toast";
+import { useTaskStore } from "../task-store";
+import { useUi } from "../ui-store";
+import { useKeyBindings } from "../shortcuts";
 import {
   api,
   type Repo,
@@ -34,7 +38,13 @@ const MENU_ACTIONS = [
 
 export function TaskPage() {
   const { id = "" } = useParams();
-  const { task, repo, kernel, detail, error, setError, reload } = useTaskLive(id);
+  const { task, repo, kernel, detail, error, reload } = useTaskLive(id);
+  const toast = useToast();
+  const navigate = useNavigate();
+  const ui = useUi();
+  const { tasks } = useTaskStore();
+  const injectRef = useRef<HTMLInputElement>(null);
+  const rejectRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<{ key: string; ext: string; text: string } | null>(null);
   const [injectText, setInjectText] = useState("");
   const [rejectText, setRejectText] = useState("");
@@ -111,15 +121,74 @@ export function TaskPage() {
     };
   }, []);
 
-  const act = async (fn: () => Promise<unknown>) => {
-    setError(null);
+  const act = async (label: string, fn: () => Promise<unknown>) => {
     try {
       await fn();
       await reload();
+      toast.success(`已${label}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      toast.error(`${label}失败`, e);
     }
   };
+
+  // Creation order, not update order: a running task's `updated_at` churns constantly
+  // and would make J/K jump to a different neighbour on every tick.
+  const siblings = useMemo(
+    () => [...tasks].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((t) => t.id),
+    [tasks],
+  );
+
+  const goSibling = useCallback(
+    (step: number) => {
+      const at = siblings.indexOf(id);
+      if (at < 0 || siblings.length < 2) return;
+      const next = siblings[(at + step + siblings.length) % siblings.length];
+      if (next) navigate(`/tasks/${next}`);
+    },
+    [siblings, id, navigate],
+  );
+
+  const keysLive = !ui.anyOverlayOpen && !preview && !!task && !!actions;
+
+  useKeyBindings([
+    { combo: "j", run: () => goSibling(1), enabled: keysLive },
+    { combo: "k", run: () => goSibling(-1), enabled: keysLive },
+    {
+      combo: "i",
+      run: () => injectRef.current?.focus(),
+      enabled: keysLive && !!actions?.inject,
+    },
+    {
+      combo: "r",
+      run: () => rejectRef.current?.focus(),
+      enabled: keysLive && !!actions?.reject && !!pendingReqId,
+    },
+    {
+      combo: "e",
+      run: () => {
+        setEditText(planDoc ?? "");
+        setEditingPlan(true);
+      },
+      enabled: keysLive && !!actions?.edit && !!pendingReqId && !editingPlan,
+    },
+    {
+      combo: "a",
+      run: () => {
+        if (!task || !pendingReqId) return;
+        void act("批准", () => api.intervene(task.id, pendingReqId, { action: "approve" }));
+      },
+      enabled: keysLive && !!actions?.approve && !!pendingReqId,
+    },
+    {
+      combo: "p",
+      run: () => {
+        if (!task) return;
+        if (actions?.pause) void act("暂停", () => api.pause(task.id));
+        else if (actions?.resume) void act("继续", () => api.resume(task.id));
+      },
+      enabled: keysLive && (!!actions?.pause || !!actions?.resume),
+    },
+  ]);
 
   if (!task || !actions) {
     return (
@@ -129,7 +198,14 @@ export function TaskPage() {
             {error}
           </PageState>
         ) : (
-          <PageState kind="loading" title="加载中…" />
+          <>
+            <Skeleton lines={2} />
+            <div className="Box">
+              <div className="Box-body">
+                <Skeleton lines={4} title={false} />
+              </div>
+            </div>
+          </>
         )}
       </div>
     );
@@ -163,7 +239,7 @@ export function TaskPage() {
                   onClick={(e) => {
                     const menu = e.currentTarget.closest("details") as HTMLDetailsElement | null;
                     if (menu) menu.open = false;
-                    void act(() => item.run(task.id));
+                    void act(item.label, () => item.run(task.id));
                   }}
                 >
                   {item.label}
@@ -213,7 +289,7 @@ export function TaskPage() {
                           type="button"
                           disabled={!actions.edit || !editText.trim()}
                           onClick={() =>
-                            void act(async () => {
+                            void act("保存并批准", async () => {
                               await api.intervene(task.id, pendingReqId, {
                                 action: "edit",
                                 content: editText,
@@ -251,10 +327,13 @@ export function TaskPage() {
                     type="button"
                     disabled={!actions.approve}
                     onClick={() =>
-                      void act(() => api.intervene(task.id, pendingReqId, { action: "approve" }))
+                      void act("批准", () =>
+                        api.intervene(task.id, pendingReqId, { action: "approve" }),
+                      )
                     }
                   >
                     批准
+                    <kbd className="kbd">A</kbd>
                   </button>
                   <button
                     className="btn"
@@ -266,8 +345,10 @@ export function TaskPage() {
                     }}
                   >
                     编辑计划…
+                    <kbd className="kbd">E</kbd>
                   </button>
                   <input
+                    ref={rejectRef}
                     placeholder="驳回意见"
                     value={rejectText}
                     onChange={(e) => setRejectText(e.target.value)}
@@ -277,7 +358,7 @@ export function TaskPage() {
                     type="button"
                     disabled={!actions.reject}
                     onClick={() =>
-                      void act(() =>
+                      void act("驳回", () =>
                         api.intervene(task.id, pendingReqId, {
                           action: "reject",
                           comments: [
@@ -293,6 +374,7 @@ export function TaskPage() {
                     }
                   >
                     驳回
+                    <kbd className="kbd">R</kbd>
                   </button>
                 </div>
               </div>
@@ -436,6 +518,7 @@ export function TaskPage() {
           injectText={injectText}
           onInjectText={setInjectText}
           onAct={act}
+          injectRef={injectRef}
         />
       </div>
 
@@ -478,6 +561,7 @@ function TaskAside({
   injectText,
   onInjectText,
   onAct,
+  injectRef,
 }: {
   task: Task;
   repo: Repo | null;
@@ -485,7 +569,8 @@ function TaskAside({
   actions: TaskActions;
   injectText: string;
   onInjectText: (value: string) => void;
-  onAct: (fn: () => Promise<unknown>) => void;
+  onAct: (label: string, fn: () => Promise<unknown>) => void;
+  injectRef: React.RefObject<HTMLInputElement | null>;
 }) {
   return (
     <div className="task-aside">
@@ -544,6 +629,7 @@ function TaskAside({
         <h2 className="task-aside-title">注入</h2>
         <div className="task-inject">
           <input
+            ref={injectRef}
             placeholder={actions.inject ? "例如：不要动 legacy/" : "当前无法注入"}
             value={injectText}
             disabled={!actions.inject}
@@ -554,7 +640,7 @@ function TaskAside({
             type="button"
             disabled={!actions.inject || !injectText.trim()}
             onClick={() =>
-              void onAct(async () => {
+              void onAct("注入", async () => {
                 await api.inject(task.id, injectText);
                 onInjectText("");
               })

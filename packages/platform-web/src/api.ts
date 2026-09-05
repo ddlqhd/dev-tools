@@ -1,4 +1,5 @@
 import type { TaskDetail as SharedTaskDetail, WorkflowView } from "@devtools/shared";
+import { getPlatformToken } from "./api-token";
 
 export type {
   ArtifactFile,
@@ -114,17 +115,9 @@ export type KernelTaskSnapshot = {
 /** Wire payload: older kernels omit `workflow`. */
 export type TaskDetail = Omit<SharedTaskDetail, "workflow"> & { workflow?: WorkflowView };
 
-/** PLATFORM_TOKEN for console: localStorage, or Vite env at build time. */
-export function getPlatformToken(): string | undefined {
-  try {
-    const fromStore = localStorage.getItem("platformToken");
-    if (fromStore) return fromStore;
-  } catch {
-    // ignore
-  }
-  const fromEnv = import.meta.env.VITE_PLATFORM_TOKEN as string | undefined;
-  return fromEnv || undefined;
-}
+export { getPlatformToken };
+export { connectHub, subscribeHubStatus, useHubStatus, useHubSync } from "./hub";
+export type { HubMessage, HubStatus } from "./hub";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getPlatformToken();
@@ -222,41 +215,3 @@ export const api = {
   terminateInstance: (id: string) =>
     req(`/api/instances/${id}/terminate`, { method: "POST", body: "{}" }),
 };
-
-export function connectHub(onMessage: (msg: { type: string; payload: unknown }) => void): () => void {
-  let closed = false;
-  let socket: WebSocket | undefined;
-  let retry: ReturnType<typeof setTimeout> | undefined;
-  let delayMs = 500;
-
-  const attach = () => {
-    if (closed) return;
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const token = getPlatformToken();
-    const q = token ? `?token=${encodeURIComponent(token)}` : "";
-    const ws = new WebSocket(`${proto}://${location.host}/api/stream${q}`);
-    socket = ws;
-    ws.onmessage = (ev) => {
-      try {
-        onMessage(JSON.parse(String(ev.data)) as { type: string; payload: unknown });
-      } catch {
-        // ignore
-      }
-    };
-    ws.onopen = () => {
-      delayMs = 500;
-    };
-    ws.onclose = () => {
-      if (closed) return;
-      retry = setTimeout(attach, delayMs);
-      delayMs = Math.min(delayMs * 2, 8_000);
-    };
-  };
-
-  attach();
-  return () => {
-    closed = true;
-    if (retry) clearTimeout(retry);
-    socket?.close();
-  };
-}

@@ -1,13 +1,25 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { PageState, StatusBanner } from "../components/PageState";
+import { useToast } from "../components/Toast";
 import { api, type Instance } from "../api";
 
 export function InstancesPage() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   const reload = () => api.listInstances().then((r) => setInstances(r.instances));
+
+  const terminate = async (instance: Instance) => {
+    try {
+      await api.terminateInstance(instance.id);
+      await reload();
+      toast.success(`已回收实例 ${instance.id}`);
+    } catch (e) {
+      toast.error(`回收实例失败：${instance.id}`, e);
+    }
+  };
 
   useEffect(() => {
     void reload().catch((e: Error) => setError(e.message));
@@ -75,7 +87,7 @@ export function InstancesPage() {
                         <button
                           className="btn btn-danger"
                           type="button"
-                          onClick={() => void api.terminateInstance(i.id).then(() => reload())}
+                          onClick={() => void terminate(i)}
                         >
                           回收
                         </button>

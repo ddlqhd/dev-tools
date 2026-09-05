@@ -1,32 +1,26 @@
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { boardActionContext, taskActionsEnabled } from "@devtools/shared";
-import { api, connectHub, type Repo, type Task, type TaskStatus } from "../api";
-import { mergeTaskSnapshot, upsertTask } from "../merge-tasks";
-import { stateClass } from "../format";
+import { api, type Task } from "../api";
+import { errorText, useToast } from "../components/Toast";
+import { FilterBar, type FilterOption } from "../components/FilterBar";
+import { TaskListView, type ListGrouping, type ListSort } from "../components/TaskListView";
+import { useTaskStore } from "../task-store";
+import { useUi } from "../ui-store";
+import { formatCombo, useKeyBindings } from "../shortcuts";
+import { StatusIcon } from "../components/StatusIcon";
 import {
-  resolveTimeRange,
-  taskMatchesTimeRange,
-  type TimeFilterMode,
-} from "../task-time-filter";
-
-const COLUMNS: Array<{ key: TaskStatus | "active"; title: string; match: TaskStatus[] }> = [
-  { key: "queued", title: "排队", match: ["queued", "preparing"] },
-  { key: "running", title: "运行中", match: ["running", "delivering"] },
-  { key: "paused", title: "暂停", match: ["paused"] },
-  { key: "waiting_human", title: "等人", match: ["waiting_human"] },
-  { key: "done", title: "完成", match: ["done", "merged"] },
-  { key: "failed", title: "失败", match: ["failed", "cancelled"] },
-];
-
-const TERMINAL_STATUSES: TaskStatus[] = ["done", "merged", "failed", "cancelled"];
-
-const TIME_PRESETS: Array<{ mode: TimeFilterMode; label: string }> = [
-  { mode: "all", label: "全部" },
-  { mode: "today", label: "今天" },
-  { mode: "7d", label: "近7天" },
-  { mode: "30d", label: "近1个月" },
-];
+  COLUMNS,
+  EMPTY_FILTERS,
+  TERMINAL_STATUSES,
+  activeFilterCount,
+  filtersFromParams,
+  filtersToParams,
+  laneOfStatus,
+  rangeOf,
+  taskMatchesFilters,
+  type BoardFilters,
+} from "../board-filters";
 
 const MENU_ACTIONS = [
   { key: "pause" as const, label: "暂停", run: (id: string) => api.pause(id) },
@@ -58,15 +52,16 @@ function countDescendantTasks(tasks: Task[], rootId: string): number {
 }
 
 export function BoardPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [repos, setRepos] = useState<Repo[]>([]);
+  const { tasks, repos, loaded, error: loadError, applyTask, removeTask } = useTaskStore();
+  const toast = useToast();
   const [pipelines, setPipelines] = useState<string[]>([]);
   const [pipelinesLoading, setPipelinesLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [timeMode, setTimeMode] = useState<TimeFilterMode>("all");
-  const [rangeFrom, setRangeFrom] = useState("");
-  const [rangeTo, setRangeTo] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
+  /** Scoped to the create dialog: form errors belong next to the form, not in a toast. */
+  const [formError, setFormError] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const ui = useUi();
+  const createOpen = ui.createOpen;
   const [pendingDelete, setPendingDelete] = useState<{
     id: string;
     title: string;
@@ -80,52 +75,18 @@ export function BoardPage() {
   });
 
   const closeCreate = () => {
-    setCreateOpen(false);
-    setError(null);
+    ui.closeCreate();
+    setFormError(null);
   };
 
   const closeDelete = () => {
     setPendingDelete(null);
   };
 
-  const reload = async () => {
-    const fetchedAt = new Date().toISOString();
-    const [t, r] = await Promise.all([api.listTasks(), api.listRepos()]);
-    setTasks((prev) => mergeTaskSnapshot(prev, t.tasks, fetchedAt));
-    setRepos(r.repos);
-    if (!form.repoId && r.repos[0]) {
-      setForm((f) => ({ ...f, repoId: r.repos[0]!.id }));
-    }
-  };
-
   useEffect(() => {
-    void reload().catch((e: Error) => setError(e.message));
-    const off = connectHub((msg) => {
-      if (msg.type === "task.updated" && msg.payload) {
-        const task = msg.payload as Task;
-        setTasks((prev) => upsertTask(prev, task));
-        if (task.status === "waiting_human" && "Notification" in window) {
-          if (Notification.permission === "granted") {
-            new Notification("codeloop: 需要人工介入", { body: task.title });
-          } else if (Notification.permission !== "denied") {
-            void Notification.requestPermission();
-          }
-        }
-      }
-      if (msg.type === "task.deleted" && msg.payload) {
-        const { id } = msg.payload as { id: string };
-        setTasks((prev) => prev.filter((t) => t.id !== id));
-      }
-    });
-    return off;
-  }, []);
-
-  useEffect(() => {
-    const tick = setInterval(() => {
-      void reload().catch(() => undefined);
-    }, 4000);
-    return () => clearInterval(tick);
-  }, []);
+    if (form.repoId || !repos[0]) return;
+    setForm((f) => ({ ...f, repoId: repos[0]!.id }));
+  }, [repos, form.repoId]);
 
   useEffect(() => {
     if (!createOpen) {
@@ -142,7 +103,7 @@ export function BoardPage() {
     setPipelines([]);
     setForm((f) => ({ ...f, pipeline: "" }));
     setPipelinesLoading(true);
-    setError(null);
+    setFormError(null);
     void api
       .getRepoConfig(form.repoId)
       .then((res) => {
@@ -154,7 +115,7 @@ export function BoardPage() {
         if (cancelled) return;
         setPipelines([]);
         setForm((f) => ({ ...f, pipeline: "" }));
-        setError(e.message);
+        setFormError(e.message);
       })
       .finally(() => {
         if (!cancelled) setPipelinesLoading(false);
@@ -173,8 +134,8 @@ export function BoardPage() {
         if (pendingDelete) {
           setPendingDelete(null);
         } else {
-          setCreateOpen(false);
-          setError(null);
+          ui.closeCreate();
+          setFormError(null);
         }
       }
     };
@@ -205,30 +166,107 @@ export function BoardPage() {
     return (id: string) => m.get(id) ?? id;
   }, [repos]);
 
-  const timeRange = useMemo(
-    () => resolveTimeRange(timeMode, rangeFrom, rangeTo),
-    [timeMode, rangeFrom, rangeTo],
+  const filters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
+
+  const patchFilters = useCallback(
+    (patch: Partial<BoardFilters>) => {
+      setSearchParams(filtersToParams({ ...filters, ...patch }), { replace: true });
+    },
+    [filters, setSearchParams],
   );
+
+  const resetFilters = useCallback(() => {
+    setSearchParams(filtersToParams(EMPTY_FILTERS), { replace: true });
+  }, [setSearchParams]);
+
+  const timeRange = useMemo(() => rangeOf(filters), [filters]);
+
   const filteredTasks = useMemo(
-    () => tasks.filter((t) => taskMatchesTimeRange(t.created_at, timeRange)),
-    [tasks, timeRange],
+    () => tasks.filter((t) => taskMatchesFilters(t, filters, { repoName, range: timeRange })),
+    [tasks, filters, repoName, timeRange],
   );
+
   const openTaskCount = useMemo(
     () => filteredTasks.filter((task) => !TERMINAL_STATUSES.includes(task.status)).length,
     [filteredTasks],
   );
 
+  // Lane counts ignore the lane filter itself, so the menu still shows what you'd get
+  // by ticking another box.
+  const laneCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const task of tasks) {
+      if (!taskMatchesFilters(task, { ...filters, lanes: [] }, { repoName, range: timeRange })) {
+        continue;
+      }
+      const lane = laneOfStatus(task.status);
+      if (lane) counts[lane] = (counts[lane] ?? 0) + 1;
+    }
+    return counts;
+  }, [tasks, filters, repoName, timeRange]);
+
+  const repoFilterOptions = useMemo<FilterOption[]>(() => {
+    const counts = new Map<string, number>();
+    for (const t of tasks) counts.set(t.repo_id, (counts.get(t.repo_id) ?? 0) + 1);
+    return repos
+      .filter((r) => counts.has(r.id) || filters.repos.includes(r.id))
+      .map((r) => ({ value: r.id, label: r.full_name, count: counts.get(r.id) ?? 0 }));
+  }, [repos, tasks, filters.repos]);
+
+  const pipelineFilterOptions = useMemo<FilterOption[]>(() => {
+    const counts = new Map<string, number>();
+    for (const t of tasks) {
+      if (!t.pipeline_name) continue;
+      counts.set(t.pipeline_name, (counts.get(t.pipeline_name) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ value: name, label: name, count }));
+  }, [tasks]);
+
+  const visibleColumns = useMemo(
+    () => (filters.lanes.length ? COLUMNS.filter((c) => filters.lanes.includes(c.key)) : COLUMNS),
+    [filters.lanes],
+  );
+
+  const activeFilters = activeFilterCount(filters);
+
+  // View preferences live in the URL too, so a shared link reproduces exactly what
+  // the sender was looking at.
+  const view = searchParams.get("view") === "list" ? "list" : "board";
+  const grouping = (searchParams.get("group") as ListGrouping) || "lane";
+  const sort = (searchParams.get("sort") as ListSort) || "updated";
+
+  const setViewParam = useCallback(
+    (key: string, value: string, fallback: string) => {
+      const next = new URLSearchParams(searchParams);
+      if (value === fallback) next.delete(key);
+      else next.set(key, value);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
   const pipelineOptions =
     form.pipeline && !pipelines.includes(form.pipeline) ? [form.pipeline, ...pipelines] : pipelines;
 
-  const selectPreset = (mode: TimeFilterMode) => {
-    setTimeMode(mode);
-    setRangeFrom("");
-    setRangeTo("");
-  };
+  const canSubmit = !!form.repoId && !!form.requirement && !!form.pipeline && !pipelinesLoading;
+
+  useKeyBindings([
+    {
+      combo: "f",
+      run: () => searchRef.current?.focus(),
+      enabled: !ui.anyOverlayOpen && !pendingDelete,
+    },
+    {
+      combo: "v",
+      run: () => setViewParam("view", view === "list" ? "board" : "list", "board"),
+      enabled: !ui.anyOverlayOpen && !pendingDelete,
+    },
+  ]);
 
   const create = async () => {
-    setError(null);
+    setFormError(null);
     try {
       const created = await api.createTask({
         repoId: form.repoId,
@@ -236,55 +274,60 @@ export function BoardPage() {
         requirement: form.requirement,
         pipeline: form.pipeline || undefined,
       });
-      setTasks((prev) => upsertTask(prev, created.task));
+      applyTask(created.task);
       setForm((f) => ({ ...f, title: "", requirement: "" }));
-      setCreateOpen(false);
+      ui.closeCreate();
+      toast.success(`已入队「${created.task.title}」`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setFormError(errorText(e));
     }
   };
 
   const runCardAction = async (
     e: MouseEvent<HTMLButtonElement>,
-    taskId: string,
+    task: Task,
+    label: string,
     run: (id: string) => Promise<unknown>,
   ) => {
     e.preventDefault();
     e.stopPropagation();
     const menu = e.currentTarget.closest("details") as HTMLDetailsElement | null;
     if (menu) menu.open = false;
-    setError(null);
     try {
-      await run(taskId);
-      await reload();
+      await run(task.id);
+      toast.success(`已${label}「${task.title}」`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      toast.error(`${label}失败：${task.title}`, err);
     }
   };
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
-    const { id } = pendingDelete;
-    setError(null);
+    const { id, title } = pendingDelete;
     try {
       await api.deleteTask(id);
-      setTasks((prev) => prev.filter((t) => t.id !== id));
+      removeTask(id);
       setPendingDelete(null);
+      toast.success(`已删除「${title}」`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      toast.error(`删除失败：${title}`, err);
     }
   };
 
   return (
     <>
       <div className="board-page">
-        {!createOpen && !pendingDelete && error && <p className="error board-error">{error}</p>}
+        {loadError && <p className="error board-error">无法刷新任务列表：{loadError}</p>}
 
         <div className="board-heading">
           <div>
             <h1>任务看板</h1>
             <p>
-              <span>{filteredTasks.length} 个任务</span>
+              <span>
+                {activeFilters > 0
+                  ? `${filteredTasks.length} / ${tasks.length} 个任务`
+                  : `${filteredTasks.length} 个任务`}
+              </span>
               <span aria-hidden="true"> · </span>
               <span>{openTaskCount} 个未结束</span>
             </p>
@@ -293,61 +336,90 @@ export function BoardPage() {
             className="btn btn-primary"
             type="button"
             onClick={() => {
-              setError(null);
-              setCreateOpen(true);
+              setFormError(null);
+              ui.openCreate();
             }}
           >
             新建任务
           </button>
         </div>
 
-        <div className="board-filterbar" aria-label="按创建时间筛选">
-          <span className="board-filter-label">创建时间</span>
-          <div className="board-preset-group" role="group" aria-label="快捷时间范围">
-            {TIME_PRESETS.map(({ mode, label }) => (
-              <button
-                key={mode}
-                type="button"
-                className={timeMode === mode ? "btn active" : "btn"}
-                aria-pressed={timeMode === mode}
-                onClick={() => selectPreset(mode)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="board-date-range">
-            <label className="board-date-field">
-              <span>从</span>
-              <input
-                type="date"
-                value={rangeFrom}
-                onChange={(e) => {
-                  setRangeFrom(e.target.value);
-                  setTimeMode("custom");
-                }}
-              />
-            </label>
-            <span className="board-date-separator" aria-hidden="true">
-              —
-            </span>
-            <label className="board-date-field">
-              <span>到</span>
-              <input
-                type="date"
-                value={rangeTo}
-                onChange={(e) => {
-                  setRangeTo(e.target.value);
-                  setTimeMode("custom");
-                }}
-              />
-            </label>
-          </div>
-        </div>
+        <FilterBar
+          filters={filters}
+          onChange={patchFilters}
+          onReset={resetFilters}
+          repoOptions={repoFilterOptions}
+          pipelineOptions={pipelineFilterOptions}
+          laneCounts={laneCounts}
+          searchRef={searchRef}
+          trailing={
+            <>
+              {view === "list" && (
+                <>
+                  <label className="view-select">
+                    <span>分组</span>
+                    <select
+                      value={grouping}
+                      onChange={(e) => setViewParam("group", e.target.value, "lane")}
+                    >
+                      <option value="lane">状态</option>
+                      <option value="repo">仓库</option>
+                      <option value="none">不分组</option>
+                    </select>
+                  </label>
+                  <label className="view-select">
+                    <span>排序</span>
+                    <select
+                      value={sort}
+                      onChange={(e) => setViewParam("sort", e.target.value, "updated")}
+                    >
+                      <option value="updated">最近更新</option>
+                      <option value="created">创建时间</option>
+                      <option value="title">标题</option>
+                    </select>
+                  </label>
+                </>
+              )}
+              <div className="view-toggle" role="group" aria-label="视图">
+                <button
+                  type="button"
+                  className={view === "board" ? "active" : ""}
+                  aria-pressed={view === "board"}
+                  onClick={() => setViewParam("view", "board", "board")}
+                >
+                  看板
+                </button>
+                <button
+                  type="button"
+                  className={view === "list" ? "active" : ""}
+                  aria-pressed={view === "list"}
+                  onClick={() => setViewParam("view", "list", "board")}
+                >
+                  列表
+                </button>
+              </div>
+            </>
+          }
+        />
 
+        {view === "list" ? (
+          <TaskListView
+            tasks={filteredTasks}
+            repoName={repoName}
+            grouping={grouping}
+            sort={sort}
+            keyboardEnabled={!ui.anyOverlayOpen && !pendingDelete}
+            emptyHint={
+              !loaded ? "加载中…" : activeFilters > 0 ? "没有匹配当前筛选的任务" : "还没有任务"
+            }
+          />
+        ) : (
         <div className="board-viewport">
-          <div className="board">
-            {COLUMNS.map((col) => {
+          <div
+            className="board"
+            style={{ "--board-columns": visibleColumns.length } as React.CSSProperties}
+          >
+            {visibleColumns.map((col) => {
               const items = filteredTasks.filter((t) => col.match.includes(t.status));
               return (
                 <section key={col.key} className={`board-column board-column--${col.key}`}>
@@ -361,7 +433,11 @@ export function BoardPage() {
                     </span>
                   </header>
                   <div className="board-column-body">
-                    {items.length === 0 && <p className="board-column-empty">暂无任务</p>}
+                    {items.length === 0 && (
+                      <p className="board-column-empty">
+                        {!loaded ? "加载中…" : activeFilters > 0 ? "无匹配任务" : "暂无任务"}
+                      </p>
+                    )}
                     {items.map((t) => {
                       const actions = taskActionsEnabled(boardActionContext(t));
                       const repository = repoName(t.repo_id);
@@ -369,6 +445,9 @@ export function BoardPage() {
                         <div key={t.id} className="board-card">
                           <Link className="board-card-main" to={`/tasks/${t.id}`}>
                             <p className="title" title={t.title}>
+                              <span className="board-card-status">
+                                <StatusIcon status={t.status} size={13} />
+                              </span>
                               {t.title}
                             </p>
                             <div className="board-card-context">
@@ -386,9 +465,6 @@ export function BoardPage() {
                                   {t.branch}
                                 </span>
                               )}
-                              {t.status === "paused" && (
-                                <span className={`State ${stateClass("paused")}`}>暂停</span>
-                              )}
                             </div>
                             {t.error && (
                               <p className="board-card-error" title={t.error}>
@@ -404,7 +480,7 @@ export function BoardPage() {
                                   key={item.key}
                                   type="button"
                                   disabled={!actions[item.key]}
-                                  onClick={(e) => void runCardAction(e, t.id, item.run)}
+                                  onClick={(e) => void runCardAction(e, t, item.label, item.run)}
                                 >
                                   {item.label}
                                 </button>
@@ -419,7 +495,6 @@ export function BoardPage() {
                                     "details",
                                   ) as HTMLDetailsElement | null;
                                   if (menu) menu.open = false;
-                                  setError(null);
                                   setPendingDelete({
                                     id: t.id,
                                     title: t.title,
@@ -440,6 +515,7 @@ export function BoardPage() {
             })}
           </div>
         </div>
+        )}
       </div>
 
       {createOpen && (
@@ -450,6 +526,12 @@ export function BoardPage() {
             aria-modal="true"
             aria-labelledby="create-task-title"
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canSubmit) {
+                e.preventDefault();
+                void create();
+              }
+            }}
           >
             <div className="Box-header">
               <h2 id="create-task-title">新建任务</h2>
@@ -506,12 +588,13 @@ export function BoardPage() {
                 className="btn btn-primary"
                 type="button"
                 onClick={() => void create()}
-                disabled={!form.repoId || !form.requirement || !form.pipeline || pipelinesLoading}
+                disabled={!canSubmit}
               >
                 入队
+                <kbd className="kbd">{formatCombo("mod+enter")}</kbd>
               </button>
               {pipelinesLoading && <p className="muted">加载 Pipeline…</p>}
-              {error && <p className="error">{error}</p>}
+              {formError && <p className="error">{formError}</p>}
               {!repos.length && (
                 <p className="muted">
                   还没有仓库，先到 <Link to="/settings/repos">配置 → 仓库</Link>{" "}
@@ -553,7 +636,6 @@ export function BoardPage() {
                   确认删除
                 </button>
               </div>
-              {error && <p className="error">{error}</p>}
             </div>
           </div>
         </div>

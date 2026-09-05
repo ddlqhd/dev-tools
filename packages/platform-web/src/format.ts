@@ -27,6 +27,22 @@ export function fmtClock(iso: string | undefined): string {
   return iso ? iso.slice(11, 19) : "—";
 }
 
+/** Compact "how long ago" for dense list rows. Falls back to the date past a week. */
+export function fmtRelative(iso: string | undefined, now: number = Date.now()): string {
+  if (!iso) return "—";
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return "—";
+  const diff = now - ts;
+  if (diff < 60_000) return "刚刚";
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} 天前`;
+  return iso.slice(0, 10);
+}
+
 export function stageLabelClass(status: string): string {
   switch (status) {
     case "completed":

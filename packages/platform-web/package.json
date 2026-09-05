@@ -10,6 +10,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
+    "test": "node --test 'src/*.test.ts'",
     "preview": "vite preview"
   },
   "dependencies": {

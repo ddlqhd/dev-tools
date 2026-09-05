@@ -1,11 +1,17 @@
-import type { ReactElement } from "react";
-import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { useMemo, useState, type ReactElement } from "react";
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { BoardPage } from "./pages/BoardPage";
 import { TaskPage } from "./pages/TaskPage";
 import { NodeEventsPage } from "./pages/NodeEventsPage";
 import { InstancesPage } from "./pages/InstancesPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { CommandPalette, type CommandItem } from "./components/CommandPalette";
+import { ShortcutsHelp } from "./components/ShortcutsHelp";
+import { useTaskStore } from "./task-store";
+import { useUi } from "./ui-store";
+import { formatCombo, useKeyBindings } from "./shortcuts";
 import { useTheme, type ThemeChoice } from "./theme";
+import type { HubStatus } from "./api";
 
 function MarkIcon() {
   return (
@@ -58,9 +64,9 @@ function SettingsIcon() {
       aria-hidden
     >
       <path d="M2 3.5h12M2 8h12M2 12.5h12" />
-      <circle cx="5" cy="3.5" r="1.5" fill="var(--header-bg)" />
-      <circle cx="10.5" cy="8" r="1.5" fill="var(--header-bg)" />
-      <circle cx="7" cy="12.5" r="1.5" fill="var(--header-bg)" />
+      <circle cx="5" cy="3.5" r="1.5" fill="var(--sidebar-bg)" />
+      <circle cx="10.5" cy="8" r="1.5" fill="var(--sidebar-bg)" />
+      <circle cx="7" cy="12.5" r="1.5" fill="var(--sidebar-bg)" />
     </svg>
   );
 }
@@ -89,6 +95,19 @@ function SystemIcon() {
   );
 }
 
+function CollapseIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d={collapsed ? "M6.25 2.75v10.5" : "M9.75 2.75v10.5"}
+        stroke="currentColor"
+        strokeWidth="1.3"
+      />
+    </svg>
+  );
+}
+
 const THEME_OPTIONS: Array<{ key: ThemeChoice; title: string; icon: () => ReactElement }> = [
   { key: "light", title: "亮色", icon: SunIcon },
   { key: "dark", title: "暗色", icon: MoonIcon },
@@ -98,76 +117,222 @@ const THEME_OPTIONS: Array<{ key: ThemeChoice; title: string; icon: () => ReactE
 const NAV_ITEMS: Array<{
   to: string;
   label: string;
+  combo: string;
   icon: () => ReactElement;
 }> = [
-  { to: "/", label: "看板", icon: BoardIcon },
-  { to: "/instances", label: "实例", icon: InstancesIcon },
-  { to: "/settings", label: "配置", icon: SettingsIcon },
+  { to: "/", label: "看板", combo: "g b", icon: BoardIcon },
+  { to: "/instances", label: "实例", combo: "g i", icon: InstancesIcon },
+  { to: "/settings", label: "配置", combo: "g s", icon: SettingsIcon },
 ];
+
+const HUB_LABEL: Record<HubStatus, string> = {
+  online: "实时连接正常",
+  connecting: "正在连接…",
+  offline: "连接已断开，正在降级轮询",
+};
+
+const SIDEBAR_KEY = "codeloop-sidebar-collapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function HubIndicator({ status, collapsed }: { status: HubStatus; collapsed: boolean }) {
+  return (
+    <span
+      className={`hub-indicator hub-indicator--${status}`}
+      title={HUB_LABEL[status]}
+      aria-label={HUB_LABEL[status]}
+    >
+      <span className="hub-dot" aria-hidden="true" />
+      {!collapsed && <span className="hub-text">{HUB_LABEL[status]}</span>}
+    </span>
+  );
+}
 
 export function App() {
   const [theme, setTheme] = useTheme();
   const location = useLocation();
+  const navigate = useNavigate();
+  const { tasks, repos, hubStatus, waitingHumanCount } = useTaskStore();
+  const ui = useUi();
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+
   const taskRouteActive = location.pathname.startsWith("/tasks/");
 
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  const repoName = useMemo(() => {
+    const map = new Map(repos.map((r) => [r.id, r.full_name]));
+    return (id: string) => map.get(id) ?? id;
+  }, [repos]);
+
+  const commandItems = useMemo<CommandItem[]>(() => {
+    const actions: CommandItem[] = [
+      {
+        id: "action:create",
+        group: "操作",
+        label: "新建任务",
+        combo: "c",
+        run: ui.openCreate,
+      },
+      {
+        id: "action:help",
+        group: "操作",
+        label: "查看快捷键",
+        combo: "shift+/",
+        run: () => ui.setHelpOpen(true),
+      },
+    ];
+
+    const nav: CommandItem[] = NAV_ITEMS.map((item) => ({
+      id: `nav:${item.to}`,
+      group: "跳转",
+      label: `前往${item.label}`,
+      combo: item.combo,
+      run: () => navigate(item.to),
+    }));
+
+    const themes: CommandItem[] = THEME_OPTIONS.map((opt) => ({
+      id: `theme:${opt.key}`,
+      group: "外观",
+      label: `主题：${opt.title}`,
+      run: () => setTheme(opt.key),
+    }));
+
+    // Newest first so an empty query surfaces what the user just created.
+    const taskItems: CommandItem[] = [...tasks]
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((task) => ({
+        id: `task:${task.id}`,
+        group: "任务",
+        label: task.title,
+        hint: [repoName(task.repo_id), task.status, task.branch ?? undefined]
+          .filter(Boolean)
+          .join(" · "),
+        run: () => navigate(`/tasks/${task.id}`),
+      }));
+
+    return [...actions, ...nav, ...taskItems, ...themes];
+  }, [tasks, repoName, navigate, setTheme, ui]);
+
+  useKeyBindings([
+    { combo: "mod+k", run: () => ui.setCommandOpen(true), whenTyping: true },
+    { combo: "/", run: () => ui.setCommandOpen(true), enabled: !ui.anyOverlayOpen },
+    { combo: "c", run: ui.openCreate, enabled: !ui.anyOverlayOpen },
+    { combo: "?", run: () => ui.setHelpOpen(true), enabled: !ui.anyOverlayOpen },
+    { combo: "g b", run: () => navigate("/"), enabled: !ui.anyOverlayOpen },
+    { combo: "g i", run: () => navigate("/instances"), enabled: !ui.anyOverlayOpen },
+    { combo: "g s", run: () => navigate("/settings"), enabled: !ui.anyOverlayOpen },
+  ]);
+
   return (
-    <>
+    <div className={`app-shell${collapsed ? " app-shell--collapsed" : ""}`}>
       <a className="skip-link" href="#main-content">
         跳到主要内容
       </a>
-      <header className="Header">
-        <div className="Header-inner">
-          <div className="Header-top">
-            <NavLink to="/" className="Header-logo" aria-label="CodeLoop 首页" draggable={false}>
-              <span className="Header-mark">
-                <MarkIcon />
-              </span>
-              <span className="Header-brand">CodeLoop</span>
-            </NavLink>
-            <div className="Header-actions">
-              <div className="theme-toggle" role="group" aria-label="外观主题">
-                {THEME_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    title={opt.title}
-                    aria-label={opt.title}
-                    aria-pressed={theme === opt.key}
-                    className={theme === opt.key ? "active" : ""}
-                    onClick={() => setTheme(opt.key)}
-                  >
-                    <opt.icon />
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <nav className="Header-nav" aria-label="主要导航">
-            {NAV_ITEMS.map((item) => {
-              const isActive =
-                item.to === "/"
-                  ? location.pathname === "/" || taskRouteActive
-                  : location.pathname.startsWith(item.to);
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  draggable={false}
-                  aria-current={isActive ? "page" : undefined}
-                  className={`Header-link${isActive ? " active" : ""}`}
-                >
-                  <span className="Header-link-icon">
-                    <item.icon />
-                  </span>
-                  <span className="Header-link-label" data-label={item.label}>
-                    {item.label}
-                  </span>
-                </Link>
-              );
-            })}
-          </nav>
+
+      <aside className="sidebar" aria-label="主要导航">
+        <div className="sidebar-head">
+          <NavLink to="/" className="sidebar-logo" aria-label="CodeLoop 首页" draggable={false}>
+            <span className="sidebar-mark">
+              <MarkIcon />
+            </span>
+            {!collapsed && <span className="sidebar-brand">CodeLoop</span>}
+          </NavLink>
+          <button
+            type="button"
+            className="sidebar-collapse"
+            onClick={toggleCollapsed}
+            title={collapsed ? "展开侧边栏" : "收起侧边栏"}
+            aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+          >
+            <CollapseIcon collapsed={collapsed} />
+          </button>
         </div>
-      </header>
+
+        <button
+          type="button"
+          className="sidebar-search"
+          onClick={() => ui.setCommandOpen(true)}
+          title="搜索任务或执行命令"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.75" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          {!collapsed && (
+            <>
+              <span className="sidebar-search-label">搜索或跳转…</span>
+              <kbd className="kbd">{formatCombo("mod+k")}</kbd>
+            </>
+          )}
+        </button>
+
+        <nav className="sidebar-nav">
+          {NAV_ITEMS.map((item) => {
+            const isActive =
+              item.to === "/"
+                ? location.pathname === "/" || taskRouteActive
+                : location.pathname.startsWith(item.to);
+            const badge = item.to === "/" ? waitingHumanCount : 0;
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                draggable={false}
+                aria-current={isActive ? "page" : undefined}
+                className={`sidebar-link${isActive ? " active" : ""}`}
+                title={collapsed ? item.label : undefined}
+              >
+                <span className="sidebar-link-icon">
+                  <item.icon />
+                </span>
+                {!collapsed && <span className="sidebar-link-label">{item.label}</span>}
+                {badge > 0 && (
+                  <span className="sidebar-badge" title={`${badge} 个任务等待人工介入`}>
+                    {collapsed ? "" : badge}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="sidebar-foot">
+          <HubIndicator status={hubStatus} collapsed={collapsed} />
+          <div className="theme-toggle" role="group" aria-label="外观主题">
+            {THEME_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                title={opt.title}
+                aria-label={opt.title}
+                aria-pressed={theme === opt.key}
+                className={theme === opt.key ? "active" : ""}
+                onClick={() => setTheme(opt.key)}
+              >
+                <opt.icon />
+              </button>
+            ))}
+          </div>
+        </div>
+      </aside>
+
       <main
         id="main-content"
         tabIndex={-1}
@@ -183,6 +348,13 @@ export function App() {
           <Route path="/settings/:section" element={<SettingsPage />} />
         </Routes>
       </main>
-    </>
+
+      <CommandPalette
+        open={ui.commandOpen}
+        items={commandItems}
+        onClose={() => ui.setCommandOpen(false)}
+      />
+      <ShortcutsHelp open={ui.helpOpen} onClose={() => ui.setHelpOpen(false)} />
+    </div>
   );
 }
