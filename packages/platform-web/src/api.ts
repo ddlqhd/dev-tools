@@ -39,6 +39,7 @@ export interface Repo {
 export interface EngineConfig {
   type: string;
   model?: string;
+  prompt?: string;
 }
 
 /** Mirrors kernel CodeloopConfig over the platform API. */

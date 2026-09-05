@@ -12,43 +12,26 @@ export interface PromptContext {
   messageStyle?: string;
 }
 
-export function renderPrompt(template: string, ctx: PromptContext): string {
-  switch (template) {
-    case "plan":
-      return planPrompt(ctx);
-    case "code":
-      return codePrompt(ctx);
-    case "fix":
-      return fixPrompt(ctx);
-    case "review-plan":
-      return reviewPlanPrompt(ctx);
-    case "review-code":
-      return reviewCodePrompt(ctx);
-    case "verify":
-      return verifyPrompt(ctx);
-    case "commit":
-      return commitPrompt(ctx);
-    default:
-      throw new Error(`Unknown prompt template: ${template}`);
-  }
-}
+export const DEFAULT_ENGINE_ALIASES = [
+  "planner",
+  "planReviewer",
+  "coder",
+  "codeReviewer",
+  "fixer",
+  "verifier",
+  "committer",
+] as const;
 
-function instructionsBlock(instructions: string[]): string {
-  if (!instructions.length) return "";
-  return `\n\n## Human instructions (must follow)\n${instructions.map((i) => `- ${i}`).join("\n")}`;
-}
+export type DefaultEngineAlias = (typeof DEFAULT_ENGINE_ALIASES)[number];
 
-function planPrompt(ctx: PromptContext): string {
-  const prevPlan =
-    ctx.planDoc
-      ? `\n## Previous plan (revise it rather than start from scratch)\n${ctx.planDoc}`
-      : "";
-  return `You are an expert planning a software change in this repository. Work through the phases below and finish with a decision-complete plan: a coder must be able to implement it without making any further design decisions.
+/** Built-in prompt bodies keyed by engine alias. Placeholders use `{{name}}`. */
+export const DEFAULT_PROMPTS: Record<DefaultEngineAlias, string> = {
+  planner: `You are an expert planning a software change in this repository. Work through the phases below and finish with a decision-complete plan: a coder must be able to implement it without making any further design decisions.
 
 ## Requirement
-${ctx.requirement}
-${instructionsBlock(ctx.instructions)}
-${prevPlan}
+{{requirement}}
+{{instructions}}
+{{previousPlan}}
 
 ## Workflow
 
@@ -83,18 +66,16 @@ Top risks with mitigations. Prefer a stated assumption over an open question; li
 
 ### Test plan
 How the change will be verified: tests to add or update and the commands to run.
-`;
-}
+`,
 
-function codePrompt(ctx: PromptContext): string {
-  return `You are implementing a software change in this repository.
+  coder: `You are implementing a software change in this repository.
 
 ## Requirement
-${ctx.requirement}
+{{requirement}}
 
 ## Approved plan
-${ctx.planDoc ?? "(no separate plan artifact — infer from requirement)"}
-${instructionsBlock(ctx.instructions)}
+{{planDoc}}
+{{instructions}}
 
 ## Your task
 Implement the plan by editing the codebase.
@@ -102,35 +83,31 @@ Implement the plan by editing the codebase.
 - Follow existing project conventions.
 - After coding, briefly summarize what you changed.
 - Do not create a git commit (a dedicated commit stage will commit).
-`;
-}
+`,
 
-function fixPrompt(ctx: PromptContext): string {
-  return `You are fixing review findings in this repository.
+  fixer: `You are fixing review findings in this repository.
 
 ## Requirement
-${ctx.requirement}
+{{requirement}}
 
 ## Open review comments (JSON)
-${ctx.reviewComments ?? "[]"}
-${instructionsBlock(ctx.instructions)}
+{{reviewComments}}
+{{instructions}}
 
 ## Your task
 Address each open comment. Prefer fixing code over arguing.
 If you intentionally reject a comment, note why in your final summary.
 Do not create a git commit (a dedicated commit stage will commit).
-`;
-}
+`,
 
-function reviewPlanPrompt(ctx: PromptContext): string {
-  return `You are reviewing an implementation plan.
+  planReviewer: `You are reviewing an implementation plan.
 
 ## Requirement
-${ctx.requirement}
+{{requirement}}
 
 ## Plan to review
-${ctx.planDoc ?? ""}
-${instructionsBlock(ctx.instructions)}
+{{planDoc}}
+{{instructions}}
 
 ## Hard rules
 1. Read the plan (and codebase if needed). Do NOT modify source files.
@@ -153,18 +130,50 @@ ${instructionsBlock(ctx.instructions)}
 }
 
 Mark passed=true only if there are no open blocker/major issues.
-`;
-}
+`,
 
-function verifyPrompt(ctx: PromptContext): string {
-  return `You are verifying that the change in this repository is sound.
+  codeReviewer: `You are reviewing code changes for the requirement below.
 
 ## Requirement
-${ctx.requirement}
+{{requirement}}
 
 ## Plan (context)
-${ctx.planDoc ?? "(none)"}
-${instructionsBlock(ctx.instructions)}
+{{planDoc}}
+{{instructions}}
+
+## Hard rules
+1. Prefer reading the git diff / changed files. Do NOT modify source files.
+2. You MUST write the review JSON with the Write tool to exactly: \`.codeloop-review.json\`
+3. The only allowed write is \`.codeloop-review.json\`.
+
+## \`.codeloop-review.json\` shape
+{
+  "passed": boolean,
+  "summary": string,
+  "comments": [
+    {
+      "id": "string",
+      "file": "path (optional)",
+      "line": number (optional),
+      "severity": "blocker" | "major" | "minor" | "nit",
+      "comment": "string",
+      "suggestion": "string (optional)",
+      "status": "open"
+    }
+  ]
+}
+
+Mark passed=true only if there are no open blocker/major issues.
+`,
+
+  verifier: `You are verifying that the change in this repository is sound.
+
+## Requirement
+{{requirement}}
+
+## Plan (context)
+{{planDoc}}
+{{instructions}}
 
 ## Your task
 1. Work out how this project is verified: read \`package.json\` scripts, Makefile,
@@ -197,34 +206,31 @@ ${instructionsBlock(ctx.instructions)}
   gap, not a code failure: note it in the summary, do not list it under failures.
 - Keep each \`detail\` short — failing test or rule names plus the key error lines,
   not the whole log.
-`;
-}
+`,
 
-function commitPrompt(ctx: PromptContext): string {
-  const style = ctx.messageStyle ?? "conventional";
-  return `You are creating the final git commit for a finished change in this repository.
+  committer: `You are creating the final git commit for a finished change in this repository.
 
 ## Requirement
-${ctx.requirement}
+{{requirement}}
 
 ## Plan (context)
-${ctx.planDoc ?? "(none)"}
-${instructionsBlock(ctx.instructions)}
+{{planDoc}}
+{{instructions}}
 
 ## Repository state
-- branch: ${ctx.branch ?? "(current)"}
-- base commit (exclusive): ${ctx.baseCommit ?? "(unknown)"}
+- branch: {{branch}}
+- base commit (exclusive): {{baseCommit}}
 - All work is already committed as one or more WIP commits on top of that base.
 
 ## Your task
-1. Inspect the change: \`git log --oneline ${ctx.baseCommit ?? "<base>"}..HEAD\` and
-   \`git diff ${ctx.baseCommit ?? "<base>"}..HEAD --stat\` (read the diff itself where useful).
+1. Inspect the change: \`git log --oneline {{baseCommit}}..HEAD\` and
+   \`git diff {{baseCommit}}..HEAD --stat\` (read the diff itself where useful).
 2. Collapse every commit after the base into exactly one commit with an identical tree:
    \`\`\`
-   git reset --soft ${ctx.baseCommit ?? "<base>"}
+   git reset --soft {{baseCommit}}
    git -c user.name=codeloop-engine -c user.email=engine@codeloop.local commit -m "<message>"
    \`\`\`
-3. Write the message in ${style} style, describing what the change actually does:
+3. Write the message in {{messageStyle}} style, describing what the change actually does:
    a subject line under 72 characters, then a blank line and a short body when the
    change warrants one.
 
@@ -235,42 +241,51 @@ ${instructionsBlock(ctx.instructions)}
 - Leave the worktree clean.
 
 Afterwards the orchestrator checks: worktree clean, exactly one commit in
-${ctx.baseCommit ?? "<base>"}..HEAD, and the HEAD tree unchanged. Anything else fails the stage.
-`;
+{{baseCommit}}..HEAD, and the HEAD tree unchanged. Anything else fails the stage.
+`,
+};
+
+const PLACEHOLDER = /\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g;
+
+export function renderPrompt(alias: string, ctx: PromptContext, body?: string): string {
+  const trimmed = body?.trim() ? body : undefined;
+  const template =
+    trimmed ?? (isDefaultAlias(alias) ? DEFAULT_PROMPTS[alias] : undefined);
+  if (!template) {
+    throw new Error(`Unknown prompt template: ${alias}`);
+  }
+  const vars = varsFrom(alias, ctx);
+  return template.replace(PLACEHOLDER, (match, name: string) =>
+    Object.prototype.hasOwnProperty.call(vars, name) ? vars[name]! : match,
+  );
 }
 
-function reviewCodePrompt(ctx: PromptContext): string {
-  return `You are reviewing code changes for the requirement below.
-
-## Requirement
-${ctx.requirement}
-
-## Plan (context)
-${ctx.planDoc ?? "(none)"}
-${instructionsBlock(ctx.instructions)}
-
-## Hard rules
-1. Prefer reading the git diff / changed files. Do NOT modify source files.
-2. You MUST write the review JSON with the Write tool to exactly: \`.codeloop-review.json\`
-3. The only allowed write is \`.codeloop-review.json\`.
-
-## \`.codeloop-review.json\` shape
-{
-  "passed": boolean,
-  "summary": string,
-  "comments": [
-    {
-      "id": "string",
-      "file": "path (optional)",
-      "line": number (optional),
-      "severity": "blocker" | "major" | "minor" | "nit",
-      "comment": "string",
-      "suggestion": "string (optional)",
-      "status": "open"
-    }
-  ]
+function isDefaultAlias(alias: string): alias is DefaultEngineAlias {
+  return alias in DEFAULT_PROMPTS;
 }
 
-Mark passed=true only if there are no open blocker/major issues.
-`;
+function varsFrom(alias: string, ctx: PromptContext): Record<string, string> {
+  return {
+    requirement: ctx.requirement,
+    planDoc: ctx.planDoc ?? planDocFallback(alias),
+    reviewComments: ctx.reviewComments ?? "[]",
+    instructions: instructionsBlock(ctx.instructions),
+    previousPlan: ctx.planDoc
+      ? `\n## Previous plan (revise it rather than start from scratch)\n${ctx.planDoc}`
+      : "",
+    branch: ctx.branch ?? "(current)",
+    baseCommit: ctx.baseCommit ?? "(unknown)",
+    messageStyle: ctx.messageStyle ?? "conventional",
+  };
+}
+
+function planDocFallback(alias: string): string {
+  if (alias === "coder") return "(no separate plan artifact — infer from requirement)";
+  if (alias === "planReviewer") return "";
+  return "(none)";
+}
+
+function instructionsBlock(instructions: string[]): string {
+  if (!instructions.length) return "";
+  return `\n\n## Human instructions (must follow)\n${instructions.map((i) => `- ${i}`).join("\n")}`;
 }

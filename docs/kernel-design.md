@@ -172,7 +172,7 @@ export interface NodeResult {
 
 ### 2.5 codeloop 配置（`.codeloop/config.yaml`）
 
-配置负责选择 pipeline 并提供运行环境（引擎、预算、git），流程形状全部在 pipeline 定义中：
+配置负责选择 pipeline 并提供运行环境（引擎、预算、git），流程形状全部在 pipeline 定义中。阶段别名同时选定模型和提示词：`engines.<alias>.prompt` 是发给该阶段的正文，占位符为 `{{requirement}}` / `{{planDoc}}` / `{{instructions}}` 等；缺省或空字符串回退到内置默认正文。初始化 `.codeloop/config.yaml` 时写入默认模板，已有配置只补缺失的 `prompt`、不覆盖已编辑的正文。
 
 ```yaml
 version: 1
@@ -182,17 +182,27 @@ pipelineOverrides:               # 不改模板的轻量覆盖(仅允许节点�
   # 也可按节点覆盖 model，优先级高于 engines[alias].model
   # plan: { model: kimi-k3-max }
 engines:
-  # 按阶段配置引擎与模型；可用 `agent --list-models` 查看 model id
+  # 按阶段配置引擎、模型与提示词；可用 `agent --list-models` 查看 model id
   # 写作与评审用不同模型，便于交叉检视
   planner:
     type: cursor                 # cursor | claude-code | codex（cursor 启动命令为 agent）
     model: kimi-k3-max
+    prompt: |
+      You are an expert planning a software change...
+      ## Requirement
+      {{requirement}}
+      {{instructions}}
+      {{previousPlan}}
   planReviewer:
     type: cursor
     model: composer-2.5
+    prompt: |
+      You are reviewing an implementation plan...
   coder:
     type: cursor
     model: composer-2.5
+    prompt: |
+      You are implementing a software change...
   codeReviewer:
     type: cursor
     model: kimi-k3-max
@@ -225,7 +235,22 @@ git:
 | `verifier` | `verify` | 判断本项目该怎么验证并执行检查 |
 | `committer` | `commit` | 压成单个 commit 并自拟 message |
 
-模型解析优先级：`节点 model` > `engines[别名].model` > CLI 默认。别名在 config 中缺失时启动即报错。同一 `type`+`model`+读写模式的节点共享引擎会话，因此 `coder` 与 `fixer` 配同一模型时仍能延续上下文；`verify` / `commit` 各自独占会话，且因为要真实执行工具链（测试缓存、linked worktree 的 git 元数据都在工作区之外）而关闭 sandbox。
+模型解析优先级：`节点 model` > `engines[别名].model` > CLI 默认。提示词解析：`engines[别名].prompt` > 该别名的内置默认正文；自定义别名必须自带 `prompt`。别名在 config 中缺失时启动即报错。同一 `type`+`model`+读写模式的节点共享引擎会话，因此 `coder` 与 `fixer` 配同一模型时仍能延续上下文；`verify` / `commit` 各自独占会话，且因为要真实执行工具链（测试缓存、linked worktree 的 git 元数据都在工作区之外）而关闭 sandbox。
+
+提示词占位符（`{{name}}`）。改 `engines.<alias>.prompt` 时用这些名字；未知 `{{name}}` 原样留在正文里，不会报错。
+
+| 占位符 | 填入内容 | 缺省 |
+|---|---|---|
+| `{{requirement}}` | 任务需求原文 | （必有） |
+| `{{planDoc}}` | 已有方案 Markdown | `coder`：`(no separate plan artifact — infer from requirement)`；`planReviewer`：空串；其余：`(none)` |
+| `{{reviewComments}}` | 未关闭评审意见 JSON | `[]` |
+| `{{instructions}}` | 整段 `## Human instructions (must follow)` + `inject` / `resume -m` 指令 | 无注入时为空（该节不出现） |
+| `{{previousPlan}}` | 整段 `## Previous plan (revise it…)` + 上一版方案 | 无上一版时为空 |
+| `{{branch}}` | 任务分支名 | `(current)` |
+| `{{baseCommit}}` | 分支切出点（不含该 commit） | `(unknown)` |
+| `{{messageStyle}}` | commit 文案风格（节点 `messageStyle`） | `conventional` |
+
+`{{planDoc}}` 与 `{{previousPlan}}` 都来自方案产物：前者是正文本身，后者是带标题的整节，方便 planner 修订而不是重写。review / verify 提示词里的 `.codeloop-review.json` / `.codeloop-verify.json` 不是占位符，是 runner 写死的文件名，改了会和编排对不上。
 
 ## 3. 人工介入机制
 

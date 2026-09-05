@@ -2,6 +2,7 @@ import { readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   VerifyResultSchema,
+  resolveNodeEngineKey,
   type EngineTurnResult,
   type NodeSpec,
   type VerifyResult,
@@ -24,11 +25,13 @@ export class VerifyNodeRunner implements NodeRunner {
     if (!ctx.engine) throw new Error("verify node requires an engine session");
 
     const planDoc = await ctx.artifacts.readText("planDoc");
-    const prompt = renderPrompt(spec.promptTemplate ?? "verify", {
+    const engineKey = resolveNodeEngineKey(spec);
+    if (!engineKey) throw new Error("verify node requires an engine alias");
+    const prompt = renderPrompt(engineKey, {
       requirement: ctx.task.requirement,
       planDoc: planDoc ?? undefined,
       instructions: ctx.instructions,
-    });
+    }, ctx.config.engines[engineKey]?.prompt);
 
     const verifyPath = join(ctx.worktree.worktreePath, VERIFY_FILE);
     await remove(verifyPath);

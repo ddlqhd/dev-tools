@@ -1,6 +1,6 @@
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
-import type { EngineChunk, NodeSpec } from "@devtools/shared";
+import { resolveNodeEngineKey, type EngineChunk, type NodeSpec } from "@devtools/shared";
 import { renderPrompt } from "../../prompts/index.js";
 import type { NodeContext, NodeResult, NodeRunner } from "../node.js";
 
@@ -16,13 +16,15 @@ export class AgentNodeRunner implements NodeRunner {
     const reviewComments = await ctx.artifacts.readText("reviewComments", "json");
     const wantsPlanDoc =
       template === "plan" || (spec.outputs ?? []).includes("planDoc");
+    const engineKey = resolveNodeEngineKey(spec);
+    if (!engineKey) throw new Error("agent node requires an engine alias");
 
-    const prompt = renderPrompt(template, {
+    const prompt = renderPrompt(engineKey, {
       requirement: ctx.task.requirement,
       planDoc: planDoc ?? undefined,
       reviewComments: reviewComments ?? undefined,
       instructions: ctx.instructions,
-    });
+    }, ctx.config.engines[engineKey]?.prompt);
 
     let result = await ctx.engine.send(prompt, (chunk: EngineChunk) => {
       void ctx.emit({ type: "engine.chunk", payload: { nodeId: currentNodeId(ctx), chunk } });

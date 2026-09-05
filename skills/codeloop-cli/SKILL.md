@@ -251,8 +251,15 @@ as a human, or as an agent using this skill.
   with no live runner (e.g. daemon died). It restores the worktree to the
   checkpoint commit via `git reset --hard`, so uncommitted edits since the
   checkpoint are discarded.
-- Engine config (models per stage, budget, git options) lives in
-  `.codeloop/config.yaml` of the target repo.
+- Engine config (models per stage, **prompts**, budget, git options) lives in
+  `.codeloop/config.yaml` of the target repo. Edit `engines.<alias>.prompt`
+  to customize a stage. Placeholders (`{{requirement}}`, `{{planDoc}}`,
+  `{{reviewComments}}`, `{{instructions}}`, `{{previousPlan}}`, `{{branch}}`,
+  `{{baseCommit}}`, `{{messageStyle}}`) are interpolated at run time; unknown
+  `{{name}}` is left as-is. Empty `prompt` falls back to the built-in text.
+  Do not rename `.codeloop-review.json` / `.codeloop-verify.json` in those
+  prompts — the runners still look for those exact files. Full table:
+  `docs/kernel-design.md` §2.5.
 - After a disconnect, replay with `watch --after <seq>` (events are
   seq-numbered for idempotent replay).
 - This file is distributed by `codeloop sync-skills`. In dev, copies under

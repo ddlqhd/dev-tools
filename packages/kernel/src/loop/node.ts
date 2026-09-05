@@ -52,7 +52,7 @@ export interface RuntimeConfigView {
     maxEngineCalls: number;
     nodeTimeoutMinutes: number;
   };
-  engines: Record<string, { type: string; model?: string }>;
+  engines: Record<string, { type: string; model?: string; prompt?: string }>;
 }
 
 export interface NodeRunner {

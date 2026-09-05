@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { isMap, parse as parseYaml, parseDocument, Scalar, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { resolveNodeEngineKey, type NodeSpec } from "@devtools/shared";
+import { DEFAULT_ENGINE_ALIASES, DEFAULT_PROMPTS } from "./prompts/index.js";
 
 export const CodeloopConfigSchema = z.object({
   version: z.literal(1),
@@ -13,6 +14,7 @@ export const CodeloopConfigSchema = z.object({
       z.object({
         type: z.string(),
         model: z.string().optional(),
+        prompt: z.string().optional(),
       }),
     )
     .default({
@@ -61,30 +63,53 @@ export function getMissingEngineConfigs(
   return [...required].filter((engine) => !engines[engine]);
 }
 
+const ENGINE_PREAMBLE: Record<string, string> = {
+  planner: "    # model: <strong reasoning model>\n",
+  planReviewer:
+    "    # model: <different from planner>\n    # Must still write .codeloop-review.json — changing the filename breaks the runner.\n",
+  coder: "",
+  codeReviewer:
+    "    # model: <different from coder>\n    # Must still write .codeloop-review.json — changing the filename breaks the runner.\n",
+  fixer: "",
+  verifier:
+    "    # Must still write .codeloop-verify.json — changing the filename breaks the runner.\n",
+  committer: "",
+};
+
+function yamlBlock(text: string, indent: number): string {
+  const pad = " ".repeat(indent);
+  return text
+    .replace(/\n$/, "")
+    .split("\n")
+    .map((line) => (line.length ? pad + line : ""))
+    .join("\n");
+}
+
+function defaultEngineYaml(): string {
+  const blocks: string[] = [];
+  for (const alias of DEFAULT_ENGINE_ALIASES) {
+    if (alias === "verifier") {
+      blocks.push("  # Runs the project's own checks and reports; needs command execution.");
+    } else if (alias === "committer") {
+      blocks.push("  # Squashes the work into one commit and writes the message.");
+    }
+    blocks.push(`  ${alias}:`);
+    blocks.push("    type: cursor");
+    const extra = ENGINE_PREAMBLE[alias];
+    if (extra) blocks.push(extra.replace(/\n$/, ""));
+    blocks.push("    prompt: |");
+    blocks.push(yamlBlock(DEFAULT_PROMPTS[alias], 6));
+  }
+  return blocks.join("\n");
+}
+
 export const DEFAULT_CONFIG_YAML = `version: 1
 pipeline: default-codeloop
 # Stage engines: assign different models for cross-review.
 # List available model ids with: agent --list-models (cursor) or: opencode models (opencode)
+# Each alias also carries the stage prompt ({{requirement}}, {{planDoc}}, …).
 engines:
-  planner:
-    type: cursor
-    # model: <strong reasoning model>
-  planReviewer:
-    type: cursor
-    # model: <different from planner>
-  coder:
-    type: cursor
-  codeReviewer:
-    type: cursor
-    # model: <different from coder>
-  fixer:
-    type: cursor
-  # Runs the project's own checks and reports; needs command execution.
-  verifier:
-    type: cursor
-  # Squashes the work into one commit and writes the message.
-  committer:
-    type: cursor
+${defaultEngineYaml()}
 budget:
   maxEngineCalls: 60
   nodeTimeoutMinutes: 30
@@ -100,6 +125,27 @@ inplace: false
 sandbox: false
 `;
 
+/** Insert default prompts under existing engine aliases that lack a non-empty prompt. */
+export function backfillEnginePrompts(raw: string): string {
+  const doc = parseDocument(raw);
+  if (doc.errors.length) return raw;
+  const engines = doc.get("engines");
+  if (!isMap(engines)) return raw;
+
+  let changed = false;
+  for (const alias of DEFAULT_ENGINE_ALIASES) {
+    const entry = engines.get(alias);
+    if (!isMap(entry)) continue;
+    const existing = entry.get("prompt");
+    if (typeof existing === "string" && existing.trim()) continue;
+    const scalar = new Scalar(DEFAULT_PROMPTS[alias]);
+    scalar.type = "BLOCK_LITERAL";
+    entry.set("prompt", scalar);
+    changed = true;
+  }
+  return changed ? String(doc) : raw;
+}
+
 export async function ensureCodeloopDir(repoPath: string): Promise<string> {
   const root = join(repoPath, ".codeloop");
   await mkdir(join(root, "pipelines"), { recursive: true });
@@ -108,7 +154,11 @@ export async function ensureCodeloopDir(repoPath: string): Promise<string> {
 
   const configPath = join(root, "config.yaml");
   try {
-    await readFile(configPath, "utf8");
+    const existing = await readFile(configPath, "utf8");
+    const updated = backfillEnginePrompts(existing);
+    if (updated !== existing) {
+      await writeFile(configPath, updated, "utf8");
+    }
   } catch {
     await writeFile(configPath, DEFAULT_CONFIG_YAML, "utf8");
   }

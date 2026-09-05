@@ -31,9 +31,11 @@ export function normalizeConfig(config: CodeloopConfig): CodeloopConfig {
   const engines: CodeloopConfig["engines"] = {};
   for (const [key, value] of Object.entries(config.engines)) {
     const model = value.model?.trim();
+    const prompt = value.prompt?.trim();
     engines[key] = {
       type: value.type,
       ...(model ? { model } : {}),
+      ...(prompt ? { prompt: value.prompt } : {}),
     };
   }
   return { ...config, engines };

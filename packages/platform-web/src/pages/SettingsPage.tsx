@@ -172,6 +172,7 @@ export function SettingsPage() {
         engines[key] = {
           type: bulkType,
           ...(bulkModel.trim() ? { model: bulkModel.trim() } : {}),
+          ...(engines[key]?.prompt?.trim() ? { prompt: engines[key].prompt } : {}),
         };
       }
       return { ...c, engines };
@@ -194,6 +195,7 @@ export function SettingsPage() {
             {
               type: value.type,
               ...(value.model?.trim() ? { model: value.model.trim() } : {}),
+              ...(value.prompt?.trim() ? { prompt: value.prompt } : {}),
             },
           ]),
         ),

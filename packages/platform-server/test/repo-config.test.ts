@@ -71,6 +71,14 @@ test("parseRepoConfig: strips empty model strings", () => {
   assert.equal(parsed.engines.coder?.model, undefined);
 });
 
+test("parseRepoConfig: keeps a custom engine prompt", () => {
+  const parsed = parseRepoConfig({
+    version: 1,
+    engines: { coder: { type: "cursor", prompt: "do {{requirement}}" } },
+  });
+  assert.equal(parsed.engines.coder?.prompt, "do {{requirement}}");
+});
+
 test("formatConfigError: joins zod issues", () => {
   try {
     parseRepoConfig({ version: 99 });

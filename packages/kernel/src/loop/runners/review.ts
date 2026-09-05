@@ -2,6 +2,7 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ReviewResultSchema,
+  resolveNodeEngineKey,
   type EngineTurnResult,
   type NodeSpec,
   type ReviewResult,
@@ -19,13 +20,14 @@ export class ReviewNodeRunner implements NodeRunner {
     if (!ctx.engine) throw new Error("review node requires an engine session");
 
     const planDoc = await ctx.artifacts.readText("planDoc");
-    const usePlanReview = (spec.outputs ?? []).includes("planComments");
+    const engineKey = resolveNodeEngineKey(spec);
+    if (!engineKey) throw new Error("review node requires an engine alias");
 
-    const prompt = renderPrompt(usePlanReview ? "review-plan" : "review-code", {
+    const prompt = renderPrompt(engineKey, {
       requirement: ctx.task.requirement,
       planDoc: planDoc ?? undefined,
       instructions: ctx.instructions,
-    });
+    }, ctx.config.engines[engineKey]?.prompt);
 
     const reviewPath = join(ctx.worktree.worktreePath, REVIEW_FILE);
     try {

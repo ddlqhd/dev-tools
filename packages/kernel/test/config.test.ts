@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, ensureCodeloopDir, getMissingEngineConfigs, writeConfig } from "../src/config.js";
+import { loadConfig, ensureCodeloopDir, getMissingEngineConfigs, writeConfig, backfillEnginePrompts } from "../src/config.js";
+import { DEFAULT_ENGINE_ALIASES, DEFAULT_PROMPTS } from "../src/prompts/index.js";
 import type { NodeSpec } from "@devtools/shared";
 
 let repo: string;
@@ -25,6 +26,11 @@ test("ensureCodeloopDir: creates layout + default config", async () => {
   }
   const configRaw = await readFile(join(codeloopRoot, "config.yaml"), "utf8");
   assert.match(configRaw, /^version: 1/m);
+  const config = await loadConfig(repo);
+  for (const alias of DEFAULT_ENGINE_ALIASES) {
+    assert.match(configRaw, new RegExp(`^  ${alias}:`, "m"), alias);
+    assert.ok(config.engines[alias]?.prompt?.includes("{{requirement}}"), alias);
+  }
 });
 
 test("ensureCodeloopDir: appends .codeloop/ to an existing .gitignore", async () => {
@@ -100,6 +106,44 @@ test("getMissingEngineConfigs: finds engines referenced by nodes", () => {
   };
   const missing = getMissingEngineConfigs(nodes, { coder: { type: "cursor" } });
   assert.deepEqual([...missing].sort(), ["planner", "verifier"]);
+});
+
+test("backfillEnginePrompts: fills missing prompts without overwriting edits", () => {
+  const raw = [
+    "version: 1",
+    "# keep this comment",
+    "engines:",
+    "  planner:",
+    "    type: cursor",
+    "    # model note",
+    "  coder:",
+    "    type: cursor",
+    "    prompt: |",
+    "      CUSTOM BODY",
+    "      {{requirement}}",
+    "",
+  ].join("\n");
+  const updated = backfillEnginePrompts(raw);
+  assert.match(updated, /# keep this comment/);
+  assert.match(updated, /# model note/);
+  assert.match(updated, /CUSTOM BODY/);
+  assert.ok(updated.includes(DEFAULT_PROMPTS.planner.trim().slice(0, 40)));
+  assert.ok(!updated.includes(DEFAULT_PROMPTS.coder.slice(0, 40)));
+});
+
+test("ensureCodeloopDir: backfills prompts on an existing config", async () => {
+  await writeFile(
+    join(codeloopRoot, "config.yaml"),
+    "version: 1\n# preserved\nengines:\n  planner:\n    type: cursor\n  coder:\n    type: cursor\n    prompt: |\n      STAY\n",
+    "utf8",
+  );
+  await ensureCodeloopDir(repo);
+  const raw = await readFile(join(codeloopRoot, "config.yaml"), "utf8");
+  assert.match(raw, /# preserved/);
+  assert.match(raw, /STAY/);
+  const config = await loadConfig(repo);
+  assert.match(config.engines.planner?.prompt ?? "", /planning a software change/);
+  assert.equal(config.engines.coder?.prompt?.trim(), "STAY");
 });
 
 test("getMissingEngineConfigs: no missing when all present", () => {
