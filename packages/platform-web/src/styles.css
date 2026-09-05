@@ -1233,6 +1233,18 @@ label.board-date-field {
   cursor: not-allowed;
 }
 
+.board-card-menu-danger {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-default);
+  color: var(--danger-fg);
+}
+
+.board-card-menu-panel button.board-card-menu-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-fg) 8%, transparent);
+  color: var(--danger-fg);
+}
+
 .board-card .title {
   display: -webkit-box;
   font-size: 14px;

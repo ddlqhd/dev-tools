@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, readdir, readFile, stat, symlink, writeFile, unlink } from "node:fs/promises";
+import { access, readdir, readFile, rm, stat, symlink, writeFile, unlink } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type {
   ArtifactFile,
@@ -25,6 +25,7 @@ import {
   createInplaceWorktree,
   createTaskWorktree,
   openExistingWorktree,
+  removeTaskWorktree,
   snapshotWorkingTreeInto,
   workingTreeDirty,
   type GitWorktree,
@@ -505,6 +506,34 @@ export class KernelRuntime {
 
   listTasks(): TaskRow[] {
     return this.store.listTasks();
+  }
+
+  /**
+   * Permanently remove a task: abort if running, drop worktree/branch (when
+   * self-created), clear `.codeloop/tasks/<id>`, and delete DB rows.
+   */
+  async deleteTask(taskId: string): Promise<void> {
+    const task = this.store.getTask(taskId);
+    if (!task) return;
+
+    const handle = this.handles.get(taskId);
+    if (handle) {
+      await handle.abort().catch(() => {});
+      this.handles.delete(taskId);
+      this.clearIntervention(taskId);
+    }
+
+    const config = await loadConfig(task.repo_path);
+    await removeTaskWorktree({
+      repoPath: task.repo_path,
+      worktreePath: task.worktree_path,
+      branch: task.branch,
+      branchPrefix: config.git.branchPrefix,
+      taskId,
+    });
+
+    await rm(this.store.taskDir(taskId), { recursive: true, force: true });
+    this.store.deleteTask(taskId);
   }
 
   /** An unfinished task whose working tree is the repo checkout itself. */

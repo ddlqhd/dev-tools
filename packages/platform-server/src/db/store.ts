@@ -351,6 +351,19 @@ export class PlatformStore {
       .get(kernelTaskId) as unknown as TaskRow | undefined;
   }
 
+  listChildTasks(parentId: string): TaskRow[] {
+    return this.db
+      .prepare(`SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC`)
+      .all(parentId) as unknown as TaskRow[];
+  }
+
+  deleteTask(id: string): void {
+    this.db.prepare(`DELETE FROM task_events WHERE task_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM interventions WHERE task_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM usage_records WHERE task_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id);
+  }
+
   findOpenTaskByIssue(repoId: string, issueNumber: number): TaskRow | undefined {
     return this.db
       .prepare(

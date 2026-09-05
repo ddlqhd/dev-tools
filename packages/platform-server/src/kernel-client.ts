@@ -69,6 +69,14 @@ export class KernelClient {
     await this.post(`/tasks/${taskId}/abort`);
   }
 
+  async delete(taskId: string): Promise<void> {
+    const res = await fetch(`${this.endpoint}/tasks/${taskId}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(`kernel delete: ${res.status} ${await res.text()}`);
+  }
+
   async inject(taskId: string, text: string): Promise<void> {
     await this.post(`/tasks/${taskId}/instructions`, { text });
   }

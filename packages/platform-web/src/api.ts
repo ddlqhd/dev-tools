@@ -82,6 +82,7 @@ export interface Task {
   loop_state: string | null;
   pipeline_name: string | null;
   error: string | null;
+  parent_task_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -130,7 +131,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      ...(init?.body != null ? { "content-type": "application/json" } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
@@ -201,6 +202,7 @@ export const api = {
     }),
   abort: (id: string) => req(`/api/tasks/${id}/abort`, { method: "POST", body: "{}" }),
   cancel: (id: string) => req(`/api/tasks/${id}/cancel`, { method: "POST", body: "{}" }),
+  deleteTask: (id: string) => req(`/api/tasks/${id}`, { method: "DELETE" }),
   retry: (id: string) => req(`/api/tasks/${id}/retry`, { method: "POST", body: "{}" }),
   inject: (id: string, text: string) =>
     req(`/api/tasks/${id}/instructions`, {

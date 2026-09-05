@@ -35,6 +35,27 @@ const MENU_ACTIONS = [
   { key: "retry" as const, label: "重试", run: (id: string) => api.retry(id) },
 ];
 
+/** Count all descendants of `rootId` in the board task list (ci-fix chains, etc.). */
+function countDescendantTasks(tasks: Task[], rootId: string): number {
+  const byParent = new Map<string, string[]>();
+  for (const t of tasks) {
+    const parent = t.parent_task_id;
+    if (!parent) continue;
+    const list = byParent.get(parent);
+    if (list) list.push(t.id);
+    else byParent.set(parent, [t.id]);
+  }
+  let count = 0;
+  const stack = [...(byParent.get(rootId) ?? [])];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    count += 1;
+    const kids = byParent.get(id);
+    if (kids) stack.push(...kids);
+  }
+  return count;
+}
+
 export function BoardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -45,6 +66,11 @@ export function BoardPage() {
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{
+    id: string;
+    title: string;
+    childCount: number;
+  } | null>(null);
   const [form, setForm] = useState({
     repoId: "",
     title: "",
@@ -55,6 +81,10 @@ export function BoardPage() {
   const closeCreate = () => {
     setCreateOpen(false);
     setError(null);
+  };
+
+  const closeDelete = () => {
+    setPendingDelete(null);
   };
 
   const reload = async () => {
@@ -85,6 +115,10 @@ export function BoardPage() {
             void Notification.requestPermission();
           }
         }
+      }
+      if (msg.type === "task.deleted" && msg.payload) {
+        const { id } = msg.payload as { id: string };
+        setTasks((prev) => prev.filter((t) => t.id !== id));
       }
     });
     return off;
@@ -128,13 +162,17 @@ export function BoardPage() {
   }, [createOpen, form.repoId]);
 
   useEffect(() => {
-    if (!createOpen) return;
+    if (!createOpen && !pendingDelete) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setCreateOpen(false);
-        setError(null);
+        if (pendingDelete) {
+          setPendingDelete(null);
+        } else {
+          setCreateOpen(false);
+          setError(null);
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -142,7 +180,7 @@ export function BoardPage() {
       document.body.style.overflow = prevOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [createOpen]);
+  }, [createOpen, pendingDelete]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -221,10 +259,23 @@ export function BoardPage() {
     }
   };
 
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const { id } = pendingDelete;
+    setError(null);
+    try {
+      await api.deleteTask(id);
+      setTasks((prev) => prev.filter((t) => t.id !== id));
+      setPendingDelete(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <>
       <div className="board-page">
-        {!createOpen && error && <p className="error board-error">{error}</p>}
+        {!createOpen && !pendingDelete && error && <p className="error board-error">{error}</p>}
 
         <div className="board-heading">
           <div>
@@ -355,6 +406,26 @@ export function BoardPage() {
                                   {item.label}
                                 </button>
                               ))}
+                              <button
+                                type="button"
+                                className="board-card-menu-danger"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  const menu = e.currentTarget.closest(
+                                    "details",
+                                  ) as HTMLDetailsElement | null;
+                                  if (menu) menu.open = false;
+                                  setError(null);
+                                  setPendingDelete({
+                                    id: t.id,
+                                    title: t.title,
+                                    childCount: countDescendantTasks(tasks, t.id),
+                                  });
+                                }}
+                              >
+                                删除
+                              </button>
                             </div>
                           </details>
                         </div>
@@ -441,6 +512,45 @@ export function BoardPage() {
               {!repos.length && (
                 <p className="muted">还没有仓库，先去「仓库」页接入本地或 GitHub 仓库。</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingDelete && (
+        <div className="modal-backdrop" onClick={closeDelete}>
+          <div
+            className="modal-panel Box"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-task-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="Box-header">
+              <h2 id="delete-task-title">删除任务</h2>
+              <button className="btn" type="button" onClick={closeDelete}>
+                取消
+              </button>
+            </div>
+            <div className="Box-body">
+              <p>
+                {pendingDelete.childCount > 0
+                  ? `将永久删除「${pendingDelete.title}」及其 worktree 与本地任务数据，并一并删除 ${pendingDelete.childCount} 个子任务及其 worktree，此操作不可恢复。`
+                  : `将永久删除「${pendingDelete.title}」及其 worktree 与本地任务数据，此操作不可恢复。`}
+              </p>
+              <div className="row" style={{ marginTop: 16, gap: 8 }}>
+                <button className="btn" type="button" onClick={closeDelete}>
+                  取消
+                </button>
+                <button
+                  className="btn btn-danger"
+                  type="button"
+                  onClick={() => void confirmDelete()}
+                >
+                  确认删除
+                </button>
+              </div>
+              {error && <p className="error">{error}</p>}
             </div>
           </div>
         </div>

@@ -31,7 +31,7 @@ const cases: Array<{
   {
     name: "queued unbound",
     ctx: { status: "queued", bound: false, kernelStatus: null, hasPendingIntervention: false },
-    expected: ["cancel"],
+    expected: ["cancel", "delete"],
   },
   {
     name: "preparing bound running",
@@ -41,7 +41,7 @@ const cases: Array<{
       kernelStatus: "running",
       hasPendingIntervention: false,
     },
-    expected: ["cancel", "abort", "pause"],
+    expected: ["cancel", "abort", "pause", "delete"],
   },
   {
     name: "running bound running",
@@ -51,7 +51,7 @@ const cases: Array<{
       kernelStatus: "running",
       hasPendingIntervention: false,
     },
-    expected: ["cancel", "abort", "pause", "inject"],
+    expected: ["cancel", "abort", "pause", "inject", "delete"],
   },
   {
     name: "running bound suspended (operator pause)",
@@ -61,7 +61,7 @@ const cases: Array<{
       kernelStatus: "suspended",
       hasPendingIntervention: false,
     },
-    expected: ["cancel", "abort", "resume"],
+    expected: ["cancel", "abort", "resume", "delete"],
   },
   {
     name: "paused bound",
@@ -71,7 +71,7 @@ const cases: Array<{
       kernelStatus: "suspended",
       hasPendingIntervention: false,
     },
-    expected: ["cancel", "abort", "resume"],
+    expected: ["cancel", "abort", "resume", "delete"],
   },
   {
     name: "paused unbound",
@@ -81,7 +81,7 @@ const cases: Array<{
       kernelStatus: null,
       hasPendingIntervention: false,
     },
-    expected: ["cancel"],
+    expected: ["cancel", "delete"],
   },
   {
     name: "waiting_human bound suspended with pending",
@@ -91,7 +91,7 @@ const cases: Array<{
       kernelStatus: "suspended",
       hasPendingIntervention: true,
     },
-    expected: ["cancel", "abort", "pause", "approve", "reject", "edit"],
+    expected: ["cancel", "abort", "pause", "approve", "reject", "edit", "delete"],
   },
   {
     name: "waiting_human bound null kernel",
@@ -101,7 +101,7 @@ const cases: Array<{
       kernelStatus: null,
       hasPendingIntervention: false,
     },
-    expected: ["cancel", "abort", "pause", "inject"],
+    expected: ["cancel", "abort", "pause", "inject", "delete"],
   },
   {
     name: "delivering bound completed",
@@ -111,12 +111,12 @@ const cases: Array<{
       kernelStatus: "completed",
       hasPendingIntervention: false,
     },
-    expected: ["cancel", "abort"],
+    expected: ["cancel", "abort", "delete"],
   },
   {
     name: "failed unbound",
     ctx: { status: "failed", bound: false, kernelStatus: null, hasPendingIntervention: false },
-    expected: ["retry"],
+    expected: ["retry", "delete"],
   },
   {
     name: "cancelled unbound",
@@ -126,17 +126,17 @@ const cases: Array<{
       kernelStatus: null,
       hasPendingIntervention: false,
     },
-    expected: ["retry"],
+    expected: ["retry", "delete"],
   },
   {
     name: "done unbound",
     ctx: { status: "done", bound: false, kernelStatus: null, hasPendingIntervention: false },
-    expected: [],
+    expected: ["delete"],
   },
   {
     name: "merged unbound",
     ctx: { status: "merged", bound: false, kernelStatus: null, hasPendingIntervention: false },
-    expected: [],
+    expected: ["delete"],
   },
 ];
 

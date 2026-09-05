@@ -9,7 +9,8 @@ export type TaskControlAction =
   | "inject"
   | "approve"
   | "reject"
-  | "edit";
+  | "edit"
+  | "delete";
 
 export interface TaskActionContext {
   status: PlatformTaskStatus;
@@ -80,6 +81,7 @@ export function taskActionsEnabled(
     approve: false,
     reject: false,
     edit: false,
+    delete: true,
   };
 
   if (CANCELABLE.has(status)) enabled.cancel = true;

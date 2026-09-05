@@ -224,6 +224,11 @@ async function handleHttp(
       json(res, 200, snap);
       return;
     }
+    if (taskMatch && method === "DELETE") {
+      await runtime.deleteTask(taskMatch[1]!);
+      json(res, 200, { ok: true });
+      return;
+    }
 
     const detailMatch = /^\/tasks\/([^/]+)\/detail$/.exec(path);
     if (detailMatch && method === "GET") {

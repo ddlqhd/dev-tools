@@ -217,6 +217,12 @@ export class KernelStore {
       .get(taskId) as unknown as CheckpointRow | undefined;
   }
 
+  deleteTask(taskId: string): void {
+    this.db.prepare(`DELETE FROM checkpoints WHERE task_id = ?`).run(taskId);
+    this.db.prepare(`DELETE FROM usage WHERE task_id = ?`).run(taskId);
+    this.db.prepare(`DELETE FROM tasks WHERE id = ?`).run(taskId);
+  }
+
   taskDir(taskId: string): string {
     return join(this.rootDir, "tasks", taskId);
   }

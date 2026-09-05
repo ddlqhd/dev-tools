@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 const TEMP_FILES = [
@@ -212,6 +212,33 @@ export async function openExistingWorktree(
   baseCommit: string,
 ): Promise<GitWorktree> {
   return new WorktreeHandle(repoPath, worktreePath, branch, baseCommit);
+}
+
+/**
+ * Remove a task's linked worktree (and its self-created branch when applicable).
+ * Inplace tasks (`worktreePath === repoPath`) are left untouched.
+ */
+export async function removeTaskWorktree(opts: {
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+  branchPrefix: string;
+  taskId: string;
+}): Promise<void> {
+  if (resolve(opts.worktreePath) === resolve(opts.repoPath)) {
+    return;
+  }
+
+  try {
+    await git(opts.repoPath, ["worktree", "remove", "--force", opts.worktreePath]);
+  } catch {
+    await rm(opts.worktreePath, { recursive: true, force: true });
+    await git(opts.repoPath, ["worktree", "prune"]).catch(() => undefined);
+  }
+
+  if (opts.branch === `${opts.branchPrefix}${opts.taskId}`) {
+    await git(opts.repoPath, ["branch", "-D", opts.branch]).catch(() => undefined);
+  }
 }
 
 class WorktreeHandle implements GitWorktree {

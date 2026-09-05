@@ -12,6 +12,7 @@ import { buildPlatformTaskDetail } from "./task-detail.js";
 import { listTaskEvents } from "./task-events.js";
 import type { PlatformConfig } from "./config.js";
 import { PlatformStore } from "./db/store.js";
+import { purgePlatformTask } from "./delete-task.js";
 import { KernelClient } from "./kernel-client.js";
 import { LocalProcessLauncher } from "./launcher/local.js";
 import { publicInstance, publicRepo } from "./public.js";
@@ -61,6 +62,10 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
     (req, body, done) => {
       const buf = body as Buffer;
       req.rawBody = buf;
+      if (buf.length === 0) {
+        done(null, undefined);
+        return;
+      }
       try {
         done(null, JSON.parse(buf.toString("utf8")) as unknown);
       } catch (err) {
@@ -217,6 +222,21 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
     }
     const repo = store.getRepo(task.repo_id);
     return { task, repo: repo ? publicRepo(repo) : null, kernel };
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/tasks/:id", async (req, reply) => {
+    try {
+      await purgePlatformTask(
+        { store, sync, hub, log: app.log },
+        req.params.id,
+      );
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof Error && (err as Error & { statusCode?: number }).statusCode === 404) {
+        return reply.code(404).send({ error: "not found" });
+      }
+      throw err;
+    }
   });
 
   app.get<{ Params: { id: string }; Querystring: { after?: string } }>(
