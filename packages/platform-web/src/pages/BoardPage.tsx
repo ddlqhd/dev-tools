@@ -321,7 +321,7 @@ export function BoardPage() {
 
         <div className="board-heading">
           <div>
-            <h1>任务看板</h1>
+            <h1>工作台</h1>
             <p>
               <span>
                 {activeFilters > 0

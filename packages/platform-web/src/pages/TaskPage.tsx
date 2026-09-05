@@ -217,7 +217,7 @@ export function TaskPage() {
     <div className="page-stack">
       <PageHeader
         sticky
-        crumb={{ to: "/", label: "看板" }}
+        crumb={{ to: "/", label: "工作台" }}
         title={task.title}
         badge={<span className={`State ${stateClass(task.status)}`}>{task.status}</span>}
         actions={

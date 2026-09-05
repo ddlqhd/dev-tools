@@ -15,13 +15,13 @@ const GROUPS: Array<{ title: string; rows: Array<[string, string]> }> = [
   {
     title: "跳转",
     rows: [
-      ["g b", "看板"],
+      ["g b", "工作台"],
       ["g i", "实例"],
       ["g s", "配置"],
     ],
   },
   {
-    title: "看板",
+    title: "工作台",
     rows: [
       ["f", "聚焦过滤框"],
       ["v", "看板 / 列表视图切换"],

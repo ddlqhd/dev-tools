@@ -1350,8 +1350,9 @@ label.settings-repo-pick {
   color: #fff;
 }
 
-/* Forms */
-input,
+/* Forms. Checkboxes/radios keep the platform control; painting them
+   like text fields makes filter chips look like a broken form. */
+input:not([type="checkbox"]):not([type="radio"]),
 textarea,
 select {
   background: var(--control-bg);
@@ -1365,7 +1366,7 @@ select {
   box-shadow: var(--shadow-small);
 }
 
-input:focus,
+input:not([type="checkbox"]):not([type="radio"]):focus,
 textarea:focus,
 select:focus {
   outline: none;
@@ -1702,9 +1703,12 @@ label {
 
 .chip-option {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: var(--space-2);
+  flex: none;
   width: 100%;
+  min-width: 0;
   padding: 5px var(--space-2);
   border: 0;
   border-radius: var(--radius-md);
@@ -1712,6 +1716,7 @@ label {
   color: var(--fg-default);
   font: inherit;
   font-size: var(--text-small);
+  font-weight: 400;
   text-align: left;
   cursor: pointer;
 }
@@ -1720,8 +1725,16 @@ label {
   background: var(--control-transparent-hover);
 }
 
-.chip-option input {
+.chip-option input[type="checkbox"] {
+  appearance: auto;
+  width: auto;
+  height: auto;
   margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
   flex-shrink: 0;
   accent-color: var(--accent-emphasis);
 }
@@ -1784,10 +1797,14 @@ label {
 
 .chip-range label {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: var(--space-2);
+  flex: none;
+  min-width: 0;
   color: var(--fg-muted);
   font-size: var(--text-tiny);
+  font-weight: 500;
 }
 
 .chip-range input {

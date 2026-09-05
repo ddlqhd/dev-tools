@@ -120,7 +120,7 @@ const NAV_ITEMS: Array<{
   combo: string;
   icon: () => ReactElement;
 }> = [
-  { to: "/", label: "看板", combo: "g b", icon: BoardIcon },
+  { to: "/", label: "工作台", combo: "g b", icon: BoardIcon },
   { to: "/instances", label: "实例", combo: "g i", icon: InstancesIcon },
   { to: "/settings", label: "配置", combo: "g s", icon: SettingsIcon },
 ];
