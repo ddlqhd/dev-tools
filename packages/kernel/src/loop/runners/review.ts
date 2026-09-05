@@ -54,6 +54,15 @@ export class ReviewNodeRunner implements NodeRunner {
           payload: { nodeId: nodeId(ctx), chunk },
         });
       });
+      await ctx.emit({
+        type: "engine.turn.completed",
+        payload: {
+          nodeId: nodeId(ctx),
+          engineType: ctx.engineType,
+          usage: result.usage,
+          filesChanged: result.filesChanged,
+        },
+      });
 
       try {
         await assertOnlyAllowedWrites(

@@ -65,11 +65,20 @@ export class CommitNodeRunner implements NodeRunner {
               prompt,
             ].join("\n");
 
-      await ctx.engine.send(turnPrompt, (chunk) => {
+      const result = await ctx.engine.send(turnPrompt, (chunk) => {
         void ctx.emit({
           type: "engine.chunk",
           payload: { nodeId: nodeId(ctx), chunk },
         });
+      });
+      await ctx.emit({
+        type: "engine.turn.completed",
+        payload: {
+          nodeId: nodeId(ctx),
+          engineType: ctx.engineType,
+          usage: result.usage,
+          filesChanged: result.filesChanged,
+        },
       });
 
       const violation = await findViolation(ctx, base, expectedTree);

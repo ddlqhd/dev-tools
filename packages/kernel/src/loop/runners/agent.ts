@@ -66,6 +66,15 @@ export class AgentNodeRunner implements NodeRunner {
             payload: { nodeId: currentNodeId(ctx), chunk },
           });
         });
+        await ctx.emit({
+          type: "engine.turn.completed",
+          payload: {
+            nodeId: currentNodeId(ctx),
+            engineType: ctx.engineType,
+            usage: result.usage,
+            filesChanged: result.filesChanged,
+          },
+        });
         planContent = resolvePlanContent(result);
       }
 

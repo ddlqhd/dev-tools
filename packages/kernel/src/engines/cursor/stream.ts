@@ -15,7 +15,7 @@
  * and lack model_call_id are real deltas; use terminal `result` for final text.
  */
 
-import type { EngineChunk } from "@devtools/shared";
+import type { EngineChunk, EngineTurnUsage } from "@devtools/shared";
 
 export interface CursorStreamState {
   sessionId?: string;
@@ -32,6 +32,8 @@ export interface CursorStreamState {
   capturedReviewJson?: string;
   /** JSON text written to `.codeloop-verify.json` via Write tool. */
   capturedVerifyJson?: string;
+  /** Token totals from the terminal `result` event (or a standalone `usage` event). */
+  usage?: EngineTurnUsage;
 }
 
 /** Record Write contents for orchestrator artifact files, whatever the path prefix. */
@@ -348,6 +350,13 @@ export function parseCursorStreamLine(
     return chunks;
   }
 
+  // Recent CLI versions emit a standalone usage event; older ones only attach
+  // it to the terminal result. Prefer the result totals when both appear.
+  if (type === "usage") {
+    applyUsage(state, event.usage ?? event, "add");
+    return chunks;
+  }
+
   if (type === "result") {
     if (typeof event.session_id === "string") state.sessionId = event.session_id;
     if (event.is_error === true || event.subtype === "error") {
@@ -361,9 +370,50 @@ export function parseCursorStreamLine(
     } else if (typeof event.result === "string") {
       state.finalText = event.result;
     }
+    applyUsage(state, event.usage ?? event, "set");
     return chunks;
   }
 
   chunks.push({ kind: "raw", type: String(type ?? "unknown"), data: event });
   return chunks;
+}
+
+/**
+ * Cursor CLI reports usage in camelCase (`inputTokens`) on recent builds;
+ * accept snake_case too so a format flip does not zero out the details page.
+ */
+function applyUsage(
+  state: CursorStreamState,
+  raw: unknown,
+  mode: "set" | "add",
+): void {
+  const parsed = readUsage(raw);
+  if (!parsed) return;
+  if (mode === "set" || !state.usage) {
+    state.usage = parsed;
+    return;
+  }
+  state.usage.inputTokens += parsed.inputTokens;
+  state.usage.outputTokens += parsed.outputTokens;
+  if (parsed.costUsd != null) {
+    state.usage.costUsd = (state.usage.costUsd ?? 0) + parsed.costUsd;
+  }
+}
+
+function readUsage(raw: unknown): EngineTurnUsage | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const u = raw as Record<string, unknown>;
+  const input = num(u.inputTokens ?? u.input_tokens);
+  const output =
+    num(u.outputTokens ?? u.output_tokens) + num(u.reasoningTokens ?? u.reasoning_tokens);
+  const costRaw = u.costUsd ?? u.cost_usd ?? u.totalCost ?? u.total_cost;
+  const costUsd = typeof costRaw === "number" && Number.isFinite(costRaw) ? costRaw : undefined;
+  if (input === 0 && output === 0 && costUsd == null) return undefined;
+  return costUsd == null
+    ? { inputTokens: input, outputTokens: output }
+    : { inputTokens: input, outputTokens: output, costUsd };
+}
+
+function num(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }

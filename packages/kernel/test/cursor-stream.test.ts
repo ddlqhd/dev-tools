@@ -217,6 +217,46 @@ test("result: sets sessionId and finalText", () => {
   assert.equal(state.sessionId, "sess-2");
   assert.equal(state.finalText, "done here");
   assert.equal(state.isError, false);
+  assert.equal(state.usage, undefined);
+});
+
+test("result: captures camelCase usage tokens", () => {
+  const { state } = parse(
+    JSON.stringify({
+      type: "result",
+      session_id: "sess-2",
+      result: "done here",
+      usage: { inputTokens: 1227, outputTokens: 13, cacheReadTokens: 100, costUsd: 0.01 },
+    }),
+  );
+  assert.deepEqual(state.usage, { inputTokens: 1227, outputTokens: 13, costUsd: 0.01 });
+});
+
+test("result: accepts snake_case usage fields", () => {
+  const { state } = parse(
+    JSON.stringify({
+      type: "result",
+      result: "done",
+      usage: { input_tokens: 80, output_tokens: 15, reasoning_tokens: 5, cost_usd: 0.002 },
+    }),
+  );
+  assert.deepEqual(state.usage, { inputTokens: 80, outputTokens: 20, costUsd: 0.002 });
+});
+
+test("usage event: accumulates until result overwrites with totals", () => {
+  const state = createCursorStreamState();
+  parse(JSON.stringify({ type: "usage", usage: { inputTokens: 10, outputTokens: 4 } }), state);
+  parse(JSON.stringify({ type: "usage", inputTokens: 20, outputTokens: 6 }), state);
+  assert.deepEqual(state.usage, { inputTokens: 30, outputTokens: 10 });
+  parse(
+    JSON.stringify({
+      type: "result",
+      result: "done",
+      usage: { inputTokens: 100, outputTokens: 50 },
+    }),
+    state,
+  );
+  assert.deepEqual(state.usage, { inputTokens: 100, outputTokens: 50 });
 });
 
 test("result: error sets isError + message", () => {

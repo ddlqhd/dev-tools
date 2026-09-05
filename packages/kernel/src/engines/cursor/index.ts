@@ -199,6 +199,7 @@ class CursorSession implements EngineSession {
 
         succeed({
           text,
+          usage: state.usage,
           filesChanged: [...state.filesChanged],
           sessionId: this.sessionId || undefined,
           capturedPlanMarkdown: state.capturedPlanMarkdown,

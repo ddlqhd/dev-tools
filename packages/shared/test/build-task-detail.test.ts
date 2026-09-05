@@ -113,6 +113,28 @@ test("parseStoredKernelEvents + completed platform task still yields stages", ()
   assert.equal(kernelStatusFromPlatform("paused"), "suspended");
 });
 
+test("buildTaskDetail: engine.turn.completed accumulates tokens and turns", () => {
+  const detail = buildTaskDetail(source(), [
+    ev(1, "node.started", { nodeId: "plan", primitive: "agent", loopStack: [] }),
+    ev(2, "engine.turn.completed", {
+      nodeId: "plan",
+      usage: { inputTokens: 100, outputTokens: 40, costUsd: 0.01 },
+    }),
+    ev(3, "engine.turn.completed", {
+      nodeId: "plan",
+      usage: { inputTokens: 20, outputTokens: 10 },
+    }),
+    ev(4, "node.completed", { nodeId: "plan", outcome: {}, artifactIds: [] }),
+  ]);
+  assert.deepEqual(detail.usage, { inputTokens: 120, outputTokens: 50, turns: 2, costUsd: 0.01 });
+  assert.deepEqual(detail.stages[0]!.usage, {
+    inputTokens: 120,
+    outputTokens: 50,
+    turns: 2,
+    costUsd: 0.01,
+  });
+});
+
 test("buildTaskDetail: empty log + flow still yields a pending workflow", () => {
   const detail = buildTaskDetail(
     source({
