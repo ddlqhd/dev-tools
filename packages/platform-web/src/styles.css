@@ -1355,28 +1355,134 @@ label.board-date-field {
   }
 }
 
-/* Issue-style task header */
-.issue-title {
-  margin: 0 0 8px;
-  font-size: 24px;
-  font-weight: 400;
-  line-height: 1.25;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
+/* Task detail: Issue / Linear-style main + aside */
+.task-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 24px;
+  align-items: start;
+  min-width: 0;
 }
 
-.issue-meta {
+.task-main {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 16px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--border-muted);
-  font-size: 14px;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.task-main > .Box {
+  margin-bottom: 0;
+}
+
+.task-aside {
+  position: sticky;
+  top: 112px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+  max-height: calc(100vh - 124px);
+  overflow-y: auto;
+}
+
+.task-aside-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--fg-muted);
+}
+
+.task-props {
+  margin: 0;
+}
+
+.task-prop {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-muted);
+  font-size: 13px;
+}
+
+.task-prop:last-child {
+  border-bottom: 0;
+}
+
+.task-prop dt {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.task-prop dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-aside-ops .action-bar {
+  margin-bottom: 10px;
+}
+
+.task-inject {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.task-inject input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.task-req {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.task-req .markdown {
+  font-size: 14px;
+}
+
+.task-intervene {
+  border-color: color-mix(in srgb, var(--attention-fg) 45%, var(--border-default));
+  background: color-mix(in srgb, var(--attention-fg) 6%, var(--canvas-default));
+}
+
+.task-intervene .Box-header {
+  background: color-mix(in srgb, var(--attention-fg) 10%, var(--canvas-subtle));
+  border-bottom-color: color-mix(in srgb, var(--attention-fg) 28%, var(--border-default));
+}
+
+.task-aside-props > .error {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .task-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .task-aside {
+    display: contents;
+    position: static;
+  }
+
+  .task-aside-ops {
+    order: -1;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-muted);
+  }
+
+  .task-aside-props {
+    padding-top: 4px;
+    border-top: 1px solid var(--border-muted);
+  }
 }
 
 /* Timeline */

@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { buildWorkflowView, countWorkflowNodes, taskActionsEnabled } from "@devtools/shared";
+import {
+  buildWorkflowView,
+  countWorkflowNodes,
+  taskActionsEnabled,
+  type TaskControlAction,
+} from "@devtools/shared";
 import { Markdown } from "../components/Markdown";
 import { PageHeader } from "../components/PageHeader";
 import { PageState, StatusBanner } from "../components/PageState";
 import {
   api,
+  type Repo,
+  type Task,
   type TaskDetail,
   type WorkflowNodeView,
   type WorkflowStepView,
@@ -13,6 +20,8 @@ import {
 } from "../api";
 import { fmtBytes, fmtClock, fmtDuration, fmtUsage, prettyJson, stageLabelClass, stageToneClass, stateClass } from "../format";
 import { useTaskLive } from "../useTaskLive";
+
+type TaskActions = Record<TaskControlAction, boolean>;
 
 export function TaskPage() {
   const { id = "" } = useParams();
@@ -106,100 +115,22 @@ export function TaskPage() {
         crumb={{ to: "/", label: "看板" }}
         title={task.title}
         badge={<span className={`State ${stateClass(task.status)}`}>{task.status}</span>}
-        meta={
-          <>
-            {repo && <span>{repo.full_name}</span>}
-            {task.issue_number != null && repo && (
-              <a
-                href={`https://github.com/${repo.full_name}/issues/${task.issue_number}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                issue #{task.issue_number}
-              </a>
-            )}
-            {task.pr_number != null && repo && (
-              <a
-                href={`https://github.com/${repo.full_name}/pull/${task.pr_number}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                PR #{task.pr_number}
-              </a>
-            )}
-            {task.current_node && <span className="Label Label--accent">{task.current_node}</span>}
-            {task.branch && (
-              <span className="Label" title={task.branch}>
-                {task.branch}
-              </span>
-            )}
-            {task.kernel_task_id && <span>kernel={task.kernel_task_id}</span>}
-          </>
-        }
-        actions={
-          <div className="action-bar">
-            <button
-              className="btn"
-              type="button"
-              disabled={!actions.pause}
-              onClick={() => void act(() => api.pause(task.id))}
-            >
-              暂停
-            </button>
-            <button
-              className="btn"
-              type="button"
-              disabled={!actions.resume}
-              onClick={() => void act(() => api.resume(task.id))}
-            >
-              继续
-            </button>
-            <button
-              className="btn btn-danger"
-              type="button"
-              disabled={!actions.abort}
-              onClick={() => void act(() => api.abort(task.id))}
-            >
-              中止
-            </button>
-            <button
-              className="btn"
-              type="button"
-              disabled={!actions.cancel}
-              onClick={() => void act(() => api.cancel(task.id))}
-            >
-              取消
-            </button>
-            <button
-              className="btn"
-              type="button"
-              disabled={!actions.retry}
-              onClick={() => void act(() => api.retry(task.id))}
-            >
-              重试
-            </button>
-          </div>
-        }
       />
 
       {task.error && <StatusBanner kind="error">{task.error}</StatusBanner>}
       {error && <StatusBanner kind="error">{error}</StatusBanner>}
 
-      {detail && <Overview detail={detail} />}
-
-      <div className="section-grid">
-        <div className="Box">
-          <div className="Box-header">
-            <h2>介入</h2>
-          </div>
-          <div className="Box-body">
-            {pendingReqId ? (
-              <>
+      <div className="task-layout">
+        <div className="task-main">
+          {pendingReqId && (
+            <div className="Box task-intervene">
+              <div className="Box-header">
+                <h2>{pendingIsLimit ? "循环已达上限" : "待审批"}</h2>
+              </div>
+              <div className="Box-body">
                 <div className="plan-panel">
                   <div className="plan-toolbar">
-                    <strong>
-                      {pendingIsLimit ? "循环已达上限" : "审阅计划 (planDoc)"}
-                    </strong>
+                    <strong>{pendingIsLimit ? "审阅当前结果" : "审阅计划 (planDoc)"}</strong>
                     <button
                       className="btn"
                       type="button"
@@ -236,11 +167,7 @@ export function TaskPage() {
                         >
                           保存并批准
                         </button>
-                        <button
-                          className="btn"
-                          type="button"
-                          onClick={() => setEditingPlan(false)}
-                        >
+                        <button className="btn" type="button" onClick={() => setEditingPlan(false)}>
                           取消编辑
                         </button>
                       </div>
@@ -311,162 +238,332 @@ export function TaskPage() {
                     驳回
                   </button>
                 </div>
-              </>
-            ) : (
-              <p className="muted">当前无待处理审批门</p>
-            )}
-            <div className="action-bar">
-              <input
-                placeholder="注入指令…"
-                value={injectText}
-                onChange={(e) => setInjectText(e.target.value)}
-              />
-              <button
-                className="btn"
-                type="button"
-                disabled={!actions.inject}
-                onClick={() =>
-                  void act(async () => {
-                    await api.inject(task.id, injectText);
-                    setInjectText("");
-                  })
-                }
-              >
-                注入
-              </button>
+              </div>
             </div>
-          </div>
-        </div>
-
-        <div className="Box">
-          <div className="Box-header">
-            <h2>需求</h2>
-          </div>
-          <div className="Box-body">
-            <pre className="artifact">{task.requirement}</pre>
-          </div>
-        </div>
-      </div>
-
-      <div className="Box">
-        <div className="Box-header">
-          <h2>流水线</h2>
-          {workflow && <span className="Counter">{countWorkflowNodes(workflow)}</span>}
-        </div>
-        <div className="Box-body">
-          {workflow && workflow.steps.length > 0 ? (
-            <div className="workflow">
-              {workflow.steps.map((step, i) => (
-                <WorkflowStep key={stepKey(step, i)} step={step} taskId={id} currentNode={task.current_node} />
-              ))}
-            </div>
-          ) : (
-            <PageState kind="empty" title="无法还原流水线定义" />
           )}
-        </div>
-      </div>
 
-      <div className="section-grid">
-        <div className="Box">
-          <div className="Box-header">
-            <h2>交付件</h2>
-          </div>
-          <div className="Box-body">
-            {detail && detail.artifacts.length > 0 ? (
-              <>
-                <div className="table-scroll">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>交付件</th>
-                        <th>产出节点</th>
-                        <th>更新时间</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detail.artifacts.map((a) => (
-                        <tr key={a.key}>
-                          <td>
-                            <button
-                              className="btn"
-                              type="button"
-                              onClick={() => void loadArtifact(a.key)}
-                            >
-                              {a.key}.{a.ext}
-                            </button>{" "}
-                            <span className="muted">{fmtBytes(a.size)}</span>
-                          </td>
-                          <td className="muted">{a.producedByNodeId ?? "—"}</td>
-                          <td className="muted">{fmtClock(a.mtime)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+          <div className="Box">
+            <div className="Box-header">
+              <h2>需求</h2>
+            </div>
+            <div className="Box-body">
+              {task.requirement.trim() ? (
+                <div className="task-req">
+                  <Markdown content={task.requirement} />
                 </div>
-                {preview && (
-                  <>
-                    <p className="muted preview-kicker">{preview.key}</p>
-                    <pre className="artifact">{prettyJson(preview.text)}</pre>
-                  </>
-                )}
-              </>
-            ) : (
-              <PageState kind="empty" title="暂无交付件" />
-            )}
+              ) : (
+                <p className="muted">无需求文本</p>
+              )}
+            </div>
+          </div>
+
+          <div className="Box">
+            <div className="Box-header">
+              <h2>流水线</h2>
+              {workflow && <span className="Counter">{countWorkflowNodes(workflow)}</span>}
+            </div>
+            <div className="Box-body">
+              {workflow && workflow.steps.length > 0 ? (
+                <div className="workflow">
+                  {workflow.steps.map((step, i) => (
+                    <WorkflowStep
+                      key={stepKey(step, i)}
+                      step={step}
+                      taskId={id}
+                      currentNode={task.current_node}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <PageState kind="empty" title="无法还原流水线定义" />
+              )}
+            </div>
+          </div>
+
+          <div className="Box">
+            <div className="Box-header">
+              <h2>交付件</h2>
+            </div>
+            <div className="Box-body">
+              {detail && detail.artifacts.length > 0 ? (
+                <>
+                  <div className="table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>交付件</th>
+                          <th>产出节点</th>
+                          <th>更新时间</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.artifacts.map((a) => (
+                          <tr key={a.key}>
+                            <td>
+                              <button
+                                className="btn"
+                                type="button"
+                                onClick={() => void loadArtifact(a.key)}
+                              >
+                                {a.key}.{a.ext}
+                              </button>{" "}
+                              <span className="muted">{fmtBytes(a.size)}</span>
+                            </td>
+                            <td className="muted">{a.producedByNodeId ?? "—"}</td>
+                            <td className="muted">{fmtClock(a.mtime)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {preview && (
+                    <>
+                      <p className="muted preview-kicker">{preview.key}</p>
+                      <pre className="artifact">{prettyJson(preview.text)}</pre>
+                    </>
+                  )}
+                </>
+              ) : (
+                <PageState kind="empty" title="暂无交付件" />
+              )}
+            </div>
+          </div>
+
+          <div className="Box">
+            <div className="Box-header">
+              <h2>提交与介入</h2>
+            </div>
+            <div className="Box-body">
+              <h3 className="subsection-title">提交</h3>
+              {detail && detail.commits.length > 0 ? (
+                <ul className="plain">
+                  {detail.commits.map((c) => (
+                    <li key={c.sha}>
+                      {repo ? (
+                        <a
+                          href={`https://github.com/${repo.full_name}/commit/${c.sha}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <code>{c.sha.slice(0, 8)}</code>
+                        </a>
+                      ) : (
+                        <code>{c.sha.slice(0, 8)}</code>
+                      )}{" "}
+                      {c.message.split("\n")[0]}
+                      {c.nodeId && <span className="muted"> · {c.nodeId}</span>}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">暂无提交</p>
+              )}
+              <h3 className="subsection-title subsection-title--later">介入记录</h3>
+              {detail && detail.interventions.length > 0 ? (
+                <ul className="plain">
+                  {detail.interventions.map((i) => (
+                    <li key={i.requestId}>
+                      <span className="Label">{i.kind}</span> {i.nodeId} — {i.summary}
+                      <span className="muted">
+                        {" "}
+                        → {i.decision?.action ?? "待处理"}
+                        {i.waitedMs != null ? ` (等待 ${fmtDuration(i.waitedMs)})` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">全程无人工介入</p>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="Box">
-          <div className="Box-header">
-            <h2>提交与介入</h2>
-          </div>
-          <div className="Box-body">
-            <h3 className="subsection-title">提交</h3>
-            {detail && detail.commits.length > 0 ? (
-              <ul className="plain">
-                {detail.commits.map((c) => (
-                  <li key={c.sha}>
-                    {repo ? (
-                      <a
-                        href={`https://github.com/${repo.full_name}/commit/${c.sha}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <code>{c.sha.slice(0, 8)}</code>
-                      </a>
-                    ) : (
-                      <code>{c.sha.slice(0, 8)}</code>
-                    )}{" "}
-                    {c.message.split("\n")[0]}
-                    {c.nodeId && <span className="muted"> · {c.nodeId}</span>}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted">暂无提交</p>
-            )}
-            <h3 className="subsection-title subsection-title--later">介入记录</h3>
-            {detail && detail.interventions.length > 0 ? (
-              <ul className="plain">
-                {detail.interventions.map((i) => (
-                  <li key={i.requestId}>
-                    <span className="Label">{i.kind}</span> {i.nodeId} — {i.summary}
-                    <span className="muted">
-                      {" "}
-                      → {i.decision?.action ?? "待处理"}
-                      {i.waitedMs != null ? ` (等待 ${fmtDuration(i.waitedMs)})` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="muted">全程无人工介入</p>
-            )}
-          </div>
-        </div>
+        <TaskAside
+          task={task}
+          repo={repo}
+          detail={detail}
+          actions={actions}
+          injectText={injectText}
+          onInjectText={setInjectText}
+          onAct={act}
+        />
       </div>
     </div>
   );
+}
+
+function TaskAside({
+  task,
+  repo,
+  detail,
+  actions,
+  injectText,
+  onInjectText,
+  onAct,
+}: {
+  task: Task;
+  repo: Repo | null;
+  detail: TaskDetail | null;
+  actions: TaskActions;
+  injectText: string;
+  onInjectText: (value: string) => void;
+  onAct: (fn: () => Promise<unknown>) => void;
+}) {
+  return (
+    <div className="task-aside">
+      <aside className="task-aside-props" aria-label="任务属性">
+        <h2 className="task-aside-title">详情</h2>
+        <dl className="task-props">
+          <PropRow label="状态">
+            <span className={`State ${stateClass(task.status)}`}>{task.status}</span>
+          </PropRow>
+          {repo && (
+            <PropRow label="仓库">
+              <span title={repo.full_name}>{repo.full_name}</span>
+            </PropRow>
+          )}
+          {task.issue_number != null && repo && (
+            <PropRow label="Issue">
+              <a
+                href={`https://github.com/${repo.full_name}/issues/${task.issue_number}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                #{task.issue_number}
+              </a>
+            </PropRow>
+          )}
+          {task.pr_number != null && repo && (
+            <PropRow label="PR">
+              <a
+                href={`https://github.com/${repo.full_name}/pull/${task.pr_number}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                #{task.pr_number}
+              </a>
+            </PropRow>
+          )}
+          {task.branch && (
+            <PropRow label="分支">
+              <span className="Label" title={task.branch}>
+                {task.branch}
+              </span>
+            </PropRow>
+          )}
+          {task.current_node && (
+            <PropRow label="当前节点">
+              <span className="Label Label--accent">{task.current_node}</span>
+            </PropRow>
+          )}
+          {asideDetailRows(detail).map(([label, value]) => (
+            <PropRow key={label} label={label}>
+              {value}
+            </PropRow>
+          ))}
+        </dl>
+        {detail?.error && <p className="error">{detail.error}</p>}
+      </aside>
+
+      <section className="task-aside-ops" aria-label="任务操作">
+        <h2 className="task-aside-title">操作</h2>
+        <div className="action-bar">
+          <button
+            className="btn"
+            type="button"
+            disabled={!actions.pause}
+            onClick={() => void onAct(() => api.pause(task.id))}
+          >
+            暂停
+          </button>
+          <button
+            className="btn"
+            type="button"
+            disabled={!actions.resume}
+            onClick={() => void onAct(() => api.resume(task.id))}
+          >
+            继续
+          </button>
+          <button
+            className="btn btn-danger"
+            type="button"
+            disabled={!actions.abort}
+            onClick={() => void onAct(() => api.abort(task.id))}
+          >
+            中止
+          </button>
+          <button
+            className="btn"
+            type="button"
+            disabled={!actions.cancel}
+            onClick={() => void onAct(() => api.cancel(task.id))}
+          >
+            取消
+          </button>
+          <button
+            className="btn"
+            type="button"
+            disabled={!actions.retry}
+            onClick={() => void onAct(() => api.retry(task.id))}
+          >
+            重试
+          </button>
+        </div>
+        <div className="task-inject">
+          <input
+            placeholder="注入指令…"
+            value={injectText}
+            onChange={(e) => onInjectText(e.target.value)}
+          />
+          <button
+            className="btn"
+            type="button"
+            disabled={!actions.inject}
+            onClick={() =>
+              void onAct(async () => {
+                await api.inject(task.id, injectText);
+                onInjectText("");
+              })
+            }
+          >
+            注入
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PropRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="task-prop">
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+function asideDetailRows(detail: TaskDetail | null): Array<[string, ReactNode]> {
+  if (!detail) return [];
+  return [
+    ["流水线", `${detail.pipeline.name} (${detail.pipeline.hash.slice(0, 12)})`],
+    ["Worktree", detail.git.worktreePath || "—"],
+    [
+      "Commit",
+      `${detail.git.baseCommit.slice(0, 8) || "—"} → ${detail.git.head?.slice(0, 8) ?? "—"}${
+        detail.git.dirty ? " (有未提交改动)" : ""
+      }`,
+    ],
+    [
+      "耗时",
+      `${fmtDuration(detail.durationMs)} · ${fmtClock(detail.startedAt)} → ${
+        detail.endedAt ? fmtClock(detail.endedAt) : "进行中"
+      }`,
+    ],
+    ["Token", fmtUsage(detail.usage)],
+    ["事件", `${detail.eventCount} 条 (seq ≤ ${detail.lastSeq})`],
+  ];
 }
 
 function workflowOf(detail: TaskDetail | null): WorkflowView | null {
@@ -533,44 +630,5 @@ function WorkflowNode({
       <span className="muted">{fmtDuration(node.durationMs)}</span>
       <span className={`Label ${stageLabelClass(node.status)}`}>{node.status}</span>
     </Link>
-  );
-}
-
-function Overview({ detail }: { detail: TaskDetail }) {
-  const rows: Array<[string, ReactNode]> = [
-    ["pipeline", `${detail.pipeline.name} (${detail.pipeline.hash.slice(0, 12)})`],
-    ["worktree", detail.git.worktreePath],
-    [
-      "commit",
-      `${detail.git.baseCommit.slice(0, 8) || "—"} → ${detail.git.head?.slice(0, 8) ?? "—"}${
-        detail.git.dirty ? " (有未提交改动)" : ""
-      }`,
-    ],
-    [
-      "耗时",
-      `${fmtDuration(detail.durationMs)} · ${fmtClock(detail.startedAt)} → ${
-        detail.endedAt ? fmtClock(detail.endedAt) : "进行中"
-      }`,
-    ],
-    ["Token 消耗", fmtUsage(detail.usage)],
-    ["事件", `${detail.eventCount} 条 (seq ≤ ${detail.lastSeq})`],
-  ];
-  return (
-    <div className="Box">
-      <div className="Box-header">
-        <h2>过程概览</h2>
-      </div>
-      <div className="Box-body">
-        <dl className="kv-grid">
-          {rows.map(([k, v]) => (
-            <div key={k} className="kv-row">
-              <dt>{k}</dt>
-              <dd>{v}</dd>
-            </div>
-          ))}
-        </dl>
-        {detail.error && <p className="error">{detail.error}</p>}
-      </div>
-    </div>
   );
 }
