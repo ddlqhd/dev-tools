@@ -333,21 +333,23 @@ export function App() {
         </div>
       </aside>
 
-      <main
-        id="main-content"
-        tabIndex={-1}
-        className={`container${location.pathname === "/" ? " container--board" : ""}`}
-      >
-        <Routes>
-          <Route path="/" element={<BoardPage />} />
-          <Route path="/tasks/:id" element={<TaskPage />} />
-          <Route path="/tasks/:id/nodes/:nodeId" element={<NodeEventsPage />} />
-          <Route path="/repos" element={<Navigate to="/settings/repos" replace />} />
-          <Route path="/instances" element={<InstancesPage />} />
-          <Route path="/settings" element={<Navigate to="/settings/repos" replace />} />
-          <Route path="/settings/:section" element={<SettingsPage />} />
-        </Routes>
-      </main>
+      <div className="content-pane">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className={`container${location.pathname === "/" ? " container--board" : ""}`}
+        >
+          <Routes>
+            <Route path="/" element={<BoardPage />} />
+            <Route path="/tasks/:id" element={<TaskPage />} />
+            <Route path="/tasks/:id/nodes/:nodeId" element={<NodeEventsPage />} />
+            <Route path="/repos" element={<Navigate to="/settings/repos" replace />} />
+            <Route path="/instances" element={<InstancesPage />} />
+            <Route path="/settings" element={<Navigate to="/settings/repos" replace />} />
+            <Route path="/settings/:section" element={<SettingsPage />} />
+          </Routes>
+        </main>
+      </div>
 
       <CommandPalette
         open={ui.commandOpen}

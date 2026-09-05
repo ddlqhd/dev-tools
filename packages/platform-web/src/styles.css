@@ -125,13 +125,19 @@
   box-sizing: border-box;
 }
 
-html {
-  scrollbar-gutter: stable;
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html,
+body {
+  overflow: hidden;
 }
 
 body {
   margin: 0;
-  min-height: 100vh;
   background: var(--canvas-default);
   color: var(--fg-default);
 }
@@ -574,8 +580,22 @@ label.settings-repo-pick {
 .app-shell {
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  align-items: start;
-  min-height: 100vh;
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Scroll lives here, not on the document: a short task and a long one
+   keep the same column width because the gutter never appears/disappears
+   on the window. */
+.content-pane {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .app-shell--collapsed {
@@ -608,12 +628,10 @@ label.settings-repo-pick {
 }
 
 .sidebar {
-  position: sticky;
-  top: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  height: 100vh;
+  min-height: 0;
   padding: var(--space-3) var(--space-2);
   border-right: 1px solid var(--border-default);
   background: var(--sidebar-bg);
@@ -732,13 +750,13 @@ label.settings-repo-pick {
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: 6px var(--space-2);
+  padding: 7px var(--space-2);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--canvas-default);
   color: var(--fg-muted);
   font: inherit;
-  font-size: var(--text-small);
+  font-size: var(--text-base);
   text-align: left;
   cursor: pointer;
   transition:
@@ -765,7 +783,7 @@ label.settings-repo-pick {
 
 .app-shell--collapsed .sidebar-search {
   justify-content: center;
-  padding: 6px 0;
+  padding: 7px 0;
 }
 
 .sidebar-nav {
@@ -782,10 +800,10 @@ label.settings-repo-pick {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 6px var(--space-2);
+  padding: 7px var(--space-2);
   border-radius: var(--radius-md);
   color: var(--header-fg);
-  font-size: var(--text-small);
+  font-size: var(--text-base);
   line-height: 20px;
   white-space: nowrap;
   transition: background var(--dur-fast) var(--ease-out);
@@ -843,7 +861,7 @@ label.settings-repo-pick {
 
 .app-shell--collapsed .sidebar-link {
   justify-content: center;
-  padding: 6px 0;
+  padding: 7px 0;
 }
 
 .app-shell--collapsed .sidebar-badge {
@@ -873,7 +891,7 @@ label.settings-repo-pick {
   min-height: 20px;
   padding: 0 var(--space-1);
   color: var(--fg-muted);
-  font-size: var(--text-tiny);
+  font-size: var(--text-small);
 }
 
 .app-shell--collapsed .hub-indicator {
@@ -982,6 +1000,7 @@ label.settings-repo-pick {
   .app-shell,
   .app-shell--collapsed {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .sidebar {
@@ -1035,11 +1054,6 @@ label.settings-repo-pick {
   .container {
     padding-left: var(--space-3);
     padding-right: var(--space-3);
-  }
-
-  /* The rail folds into a top bar; keep the task title parked under it. */
-  :root {
-    --sticky-top: 52px;
   }
 
   .page-header--sticky {
