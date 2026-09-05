@@ -6,6 +6,7 @@ import {
   taskActionsEnabled,
   type TaskControlAction,
 } from "@devtools/shared";
+import { ArtifactPreview } from "../components/ArtifactPreview";
 import { Markdown } from "../components/Markdown";
 import { PageHeader } from "../components/PageHeader";
 import { PageState, StatusBanner } from "../components/PageState";
@@ -18,7 +19,7 @@ import {
   type WorkflowStepView,
   type WorkflowView,
 } from "../api";
-import { fmtBytes, fmtClock, fmtDuration, fmtUsage, prettyJson, stageLabelClass, stageToneClass, stateClass } from "../format";
+import { fmtBytes, fmtClock, fmtDuration, fmtUsage, stageLabelClass, stageToneClass, stateClass } from "../format";
 import { useTaskLive } from "../useTaskLive";
 
 type TaskActions = Record<TaskControlAction, boolean>;
@@ -26,7 +27,7 @@ type TaskActions = Record<TaskControlAction, boolean>;
 export function TaskPage() {
   const { id = "" } = useParams();
   const { task, repo, kernel, detail, error, setError, reload } = useTaskLive(id);
-  const [preview, setPreview] = useState<{ key: string; text: string } | null>(null);
+  const [preview, setPreview] = useState<{ key: string; ext: string; text: string } | null>(null);
   const [injectText, setInjectText] = useState("");
   const [rejectText, setRejectText] = useState("");
   const [editingPlan, setEditingPlan] = useState(false);
@@ -35,11 +36,15 @@ export function TaskPage() {
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
 
-  const loadArtifact = async (key: string) => {
+  const loadArtifact = async (key: string, ext: string) => {
     try {
-      setPreview({ key, text: await api.artifact(id, key) });
+      setPreview({ key, ext, text: await api.artifact(id, key) });
     } catch (e) {
-      setPreview({ key, text: `读取失败: ${e instanceof Error ? e.message : String(e)}` });
+      setPreview({
+        key,
+        ext,
+        text: `读取失败: ${e instanceof Error ? e.message : String(e)}`,
+      });
     }
   };
 
@@ -303,7 +308,7 @@ export function TaskPage() {
                               <button
                                 className="btn"
                                 type="button"
-                                onClick={() => void loadArtifact(a.key)}
+                                onClick={() => void loadArtifact(a.key, a.ext)}
                               >
                                 {a.key}.{a.ext}
                               </button>{" "}
@@ -317,10 +322,11 @@ export function TaskPage() {
                     </table>
                   </div>
                   {preview && (
-                    <>
-                      <p className="muted preview-kicker">{preview.key}</p>
-                      <pre className="artifact">{prettyJson(preview.text)}</pre>
-                    </>
+                    <ArtifactPreview
+                      artifactKey={preview.key}
+                      ext={preview.ext}
+                      text={preview.text}
+                    />
                   )}
                 </>
               ) : (

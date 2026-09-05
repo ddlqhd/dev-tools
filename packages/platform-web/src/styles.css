@@ -977,34 +977,42 @@ label {
   white-space: nowrap;
 }
 
-.board-preset-group {
+.board-preset-group,
+.artifact-view-toggle {
   display: inline-flex;
 }
 
-.board-preset-group .btn {
+.board-preset-group .btn,
+.artifact-view-toggle .btn {
   position: relative;
   border-radius: 0;
   box-shadow: none;
 }
 
-.board-preset-group .btn + .btn {
+.board-preset-group .btn + .btn,
+.artifact-view-toggle .btn + .btn {
   margin-left: -1px;
 }
 
-.board-preset-group .btn:first-child {
+.board-preset-group .btn:first-child,
+.artifact-view-toggle .btn:first-child {
   border-radius: 6px 0 0 6px;
 }
 
-.board-preset-group .btn:last-child {
+.board-preset-group .btn:last-child,
+.artifact-view-toggle .btn:last-child {
   border-radius: 0 6px 6px 0;
 }
 
 .board-preset-group .btn:hover,
-.board-preset-group .btn.active {
+.board-preset-group .btn.active,
+.artifact-view-toggle .btn:hover,
+.artifact-view-toggle .btn.active {
   z-index: 1;
 }
 
-.board-preset-group .btn.active {
+.board-preset-group .btn.active,
+.artifact-view-toggle .btn.active {
   border-color: color-mix(in srgb, var(--accent-fg) 55%, var(--border-default));
   background: var(--canvas-default);
   color: var(--accent-fg);
@@ -1904,6 +1912,66 @@ pre.artifact {
 
 .preview-kicker {
   margin: 12px 0 6px;
+}
+
+.artifact-preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 6px;
+}
+
+.artifact-preview-kicker {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.artifact-preview {
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 12px 16px;
+  max-height: 360px;
+  overflow: auto;
+  background: var(--canvas-subtle);
+}
+
+.artifact-summary ul {
+  margin: 8px 0 0;
+  padding-left: 1.2em;
+}
+
+.artifact-summary li {
+  margin: 6px 0;
+}
+
+.artifact-summary-dl {
+  margin: 0;
+}
+
+.artifact-summary-dl > div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-muted);
+  font-size: 13px;
+}
+
+.artifact-summary-dl > div:last-child {
+  border-bottom: 0;
+}
+
+.artifact-summary-dl dt {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.artifact-summary-dl dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .subsection-title {

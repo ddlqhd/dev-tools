@@ -6,6 +6,7 @@ export * from "./build-workflow.js";
 export * from "./fold-node-events.js";
 export * from "./review.js";
 export * from "./verify.js";
+export * from "./artifact-summary.js";
 export * from "./pipeline.js";
 export * from "./platform.js";
 export * from "./task-actions.js";
