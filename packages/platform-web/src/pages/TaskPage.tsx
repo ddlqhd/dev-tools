@@ -145,7 +145,15 @@ export function TaskPage() {
         badge={<span className={`State ${stateClass(task.status)}`}>{task.status}</span>}
         actions={
           <details className="task-ops-menu">
-            <summary className="btn">操作</summary>
+            <summary className="btn">
+              操作
+              <svg className="task-ops-caret" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M4.427 7.427 7.823 10.823a.25.25 0 0 0 .354 0L11.573 7.427A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z"
+                />
+              </svg>
+            </summary>
             <div className="task-ops-menu-panel">
               {MENU_ACTIONS.map((item) => (
                 <button

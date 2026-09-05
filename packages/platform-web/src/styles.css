@@ -1455,6 +1455,18 @@ label.board-date-field {
   display: none;
 }
 
+.task-ops-caret {
+  width: 16px;
+  height: 16px;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.task-ops-menu[open] > summary {
+  background: var(--btn-hover-bg);
+  border-color: var(--border-default);
+}
+
 .task-ops-menu-panel {
   position: absolute;
   right: 0;
