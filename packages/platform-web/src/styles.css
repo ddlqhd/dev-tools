@@ -1442,8 +1442,56 @@ label.board-date-field {
   overflow-wrap: anywhere;
 }
 
-.task-aside-ops .action-bar {
-  margin-bottom: 10px;
+.task-ops-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.task-ops-menu > summary {
+  list-style: none;
+}
+
+.task-ops-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.task-ops-menu-panel {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 20;
+  min-width: 96px;
+  padding: 4px;
+  margin-top: 2px;
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  box-shadow: var(--shadow-medium);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.task-ops-menu-panel button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg-default);
+  cursor: pointer;
+}
+
+.task-ops-menu-panel button:hover:not(:disabled) {
+  background: var(--btn-hover-bg);
+}
+
+.task-ops-menu-panel button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .task-inject {
@@ -1491,12 +1539,6 @@ label.board-date-field {
   .task-aside {
     display: contents;
     position: static;
-  }
-
-  .task-aside-ops {
-    order: -1;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border-muted);
   }
 
   .task-aside-props {
