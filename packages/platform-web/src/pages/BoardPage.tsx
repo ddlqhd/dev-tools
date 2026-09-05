@@ -144,6 +144,21 @@ export function BoardPage() {
     };
   }, [createOpen]);
 
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const menus = document.querySelectorAll<HTMLDetailsElement>("details.board-card-menu[open]");
+      for (const menu of menus) {
+        if (!(event.target instanceof Node) || !menu.contains(event.target)) {
+          menu.open = false;
+        }
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, []);
+
   const repoName = useMemo(() => {
     const m = new Map(repos.map((r) => [r.id, r.full_name]));
     return (id: string) => m.get(id) ?? id;
