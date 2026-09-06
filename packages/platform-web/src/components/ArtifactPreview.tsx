@@ -135,10 +135,10 @@ export function ArtifactPreview({ artifactKey, ext, text }: Props) {
           {artifactKey}.{ext}
         </p>
         {canToggle && (
-          <div className="artifact-view-toggle" role="group" aria-label="预览模式">
+          <div className="view-toggle" role="group" aria-label="预览模式">
             <button
               type="button"
-              className={mode === "rich" ? "btn active" : "btn"}
+              className={mode === "rich" ? "active" : ""}
               aria-pressed={mode === "rich"}
               onClick={() => setMode("rich")}
             >
@@ -146,7 +146,7 @@ export function ArtifactPreview({ artifactKey, ext, text }: Props) {
             </button>
             <button
               type="button"
-              className={mode === "raw" ? "btn active" : "btn"}
+              className={mode === "raw" ? "active" : ""}
               aria-pressed={mode === "raw"}
               onClick={() => setMode("raw")}
             >
