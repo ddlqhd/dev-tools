@@ -157,7 +157,8 @@ export class TaskHandle {
       requestIntervention: (req) => this.waitForIntervention(req),
     });
 
-    this.runPromise = this.interpreter.run().finally(() => {
+    this.runPromise = this.interpreter.run().finally(async () => {
+      await this.events.flush().catch(() => undefined);
       this.runPromise = null;
       this.interpreter = null;
     });
@@ -479,6 +480,11 @@ export class KernelRuntime {
   static async open(repoPath: string): Promise<KernelRuntime> {
     const root = await ensureCodeloopDir(repoPath);
     return new KernelRuntime(repoPath, root, new KernelStore(root));
+  }
+
+  /** Write any in-memory thinking/text buffers so a shutdown does not drop them. */
+  async flushEventLogs(): Promise<void> {
+    await Promise.all([...this.handles.values()].map((handle) => handle.events.flush()));
   }
 
   close(): void {

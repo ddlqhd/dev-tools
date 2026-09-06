@@ -82,6 +82,7 @@ export async function createAndRunTask(opts: CreateAndRunOptions): Promise<TaskR
       error: result.error,
     };
   } finally {
+    await runtime.flushEventLogs();
     runtime.close();
   }
 }

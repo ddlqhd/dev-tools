@@ -17,6 +17,8 @@ import {
 } from "./api";
 import { mergePersistedAndLive } from "./merge-events";
 
+const TERMINAL = new Set(["done", "failed", "cancelled", "merged"]);
+
 export function detailFromEvents(task: Task, repo: Repo | null, events: TaskEvent[]): TaskDetail {
   return buildTaskDetail(
     {
@@ -81,29 +83,6 @@ export function useTaskLive(id: string) {
       }, 400);
     };
 
-    const appendEvent = (row: TaskEvent) => {
-      setEvents((prev) => (prev.some((e) => e.seq === row.seq) ? prev : [...prev, row]));
-    };
-
-    const offStream = connectTaskStream(id, (event) => {
-      appendEvent({
-        task_id: id,
-        seq: event.seq,
-        ts: event.ts,
-        type: event.type,
-        payload:
-          typeof event.payload === "string" ? event.payload : JSON.stringify(event.payload ?? {}),
-      });
-      if (
-        event.type === "node.started" ||
-        event.type === "node.completed" ||
-        event.type === "task.completed" ||
-        event.type === "task.failed"
-      ) {
-        scheduleDetail();
-      }
-    });
-
     const off = connectHub((msg) => {
       if (msg.type === "task.updated") {
         const t = msg.payload as Task;
@@ -145,13 +124,53 @@ export function useTaskLive(id: string) {
     });
     return () => {
       if (timer) clearTimeout(timer);
-      offStream();
       off();
     };
   }, [id, reload]);
 
+  const streamStopped = !!task && TERMINAL.has(task.status);
+
   useEffect(() => {
-    if (!task || ["done", "failed", "cancelled", "merged"].includes(task.status)) return;
+    if (streamStopped) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const offStream = connectTaskStream(id, (event) => {
+      setEvents((prev) =>
+        prev.some((e) => e.seq === event.seq)
+          ? prev
+          : [
+              ...prev,
+              {
+                task_id: id,
+                seq: event.seq,
+                ts: event.ts,
+                type: event.type,
+                payload:
+                  typeof event.payload === "string"
+                    ? event.payload
+                    : JSON.stringify(event.payload ?? {}),
+              },
+            ],
+      );
+      if (
+        event.type === "node.started" ||
+        event.type === "node.completed" ||
+        event.type === "task.completed" ||
+        event.type === "task.failed"
+      ) {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          void reload().catch(() => undefined);
+        }, 400);
+      }
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      offStream();
+    };
+  }, [id, reload, streamStopped]);
+
+  useEffect(() => {
+    if (!task || TERMINAL.has(task.status)) return;
     const tick = setInterval(() => {
       void api
         .listEvents(id)

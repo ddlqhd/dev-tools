@@ -1,8 +1,7 @@
 import { appendFile } from "node:fs/promises";
 import type { EngineChunkPayload, KernelEvent } from "@devtools/shared";
 
-/** Pause after the last mergeable token before the buffered chunk is written. */
-export const EVENT_CHUNK_COALESCE_IDLE_MS = 200;
+export type AppendLine = (path: string, data: string, encoding: BufferEncoding) => Promise<void>;
 
 type MergeableKind = "text" | "thinking";
 
@@ -17,16 +16,17 @@ interface PendingTextChunk {
 
 /**
  * Persist receiver: every live event is delivered here. Adjacent same-node
- * thinking/text tokens are concatenated; other kinds are written as-is.
+ * thinking/text tokens stay in memory until kind/node changes or a
+ * non-mergeable event arrives — idle time does not start a new record.
  */
 export class CoalescingJsonlWriter {
   private pending: PendingTextChunk | null = null;
-  private idleFlush: ReturnType<typeof setTimeout> | undefined;
   private writeChain: Promise<void> = Promise.resolve();
+  private lastWriteError: Error | null = null;
 
   constructor(
     private readonly path: string,
-    private readonly coalesceIdleMs = EVENT_CHUNK_COALESCE_IDLE_MS,
+    private readonly append: AppendLine = appendFile,
   ) {}
 
   accept(event: KernelEvent): Promise<void> {
@@ -40,7 +40,6 @@ export class CoalescingJsonlWriter {
       ) {
         this.pending.text += piece.text;
         this.pending.lastSeq = event.seq;
-        this.scheduleIdleFlush();
         return this.writeChain;
       }
       const prev = this.pending;
@@ -50,38 +49,48 @@ export class CoalescingJsonlWriter {
         lastSeq: event.seq,
         taskId: event.taskId,
       };
-      this.scheduleIdleFlush();
       return prev ? this.writeMerged(prev) : this.writeChain;
     }
-    const flushed = this.flushPending();
-    return flushed.then(() => this.writeEvent(event));
+    return this.flushPending().then(() => this.writeEvent(event));
+  }
+
+  /** In-memory merged chunk not yet on disk. */
+  peekPending(): KernelEvent | null {
+    const chunk = this.pending;
+    if (!chunk) return null;
+    return {
+      seq: chunk.lastSeq,
+      taskId: chunk.taskId,
+      ts: chunk.ts,
+      type: "engine.chunk",
+      payload: {
+        nodeId: chunk.nodeId,
+        chunk: { kind: chunk.kind, text: chunk.text },
+      },
+    };
   }
 
   async flush(): Promise<void> {
     await this.flushPending();
+    await this.throwIfWriteFailed();
+  }
+
+  /** Wait for queued appends without forcing the current thinking/text buffer to disk. */
+  async waitForWrites(): Promise<void> {
+    await this.throwIfWriteFailed();
+  }
+
+  private async throwIfWriteFailed(): Promise<void> {
     await this.writeChain;
-  }
-
-  private scheduleIdleFlush(): void {
-    if (this.idleFlush) clearTimeout(this.idleFlush);
-    if (this.coalesceIdleMs < 0) return;
-    this.idleFlush = setTimeout(() => {
-      this.idleFlush = undefined;
-      void this.flushPending();
-    }, this.coalesceIdleMs);
-    this.idleFlush.unref?.();
-  }
-
-  private clearIdleFlush(): void {
-    if (!this.idleFlush) return;
-    clearTimeout(this.idleFlush);
-    this.idleFlush = undefined;
+    if (!this.lastWriteError) return;
+    const err = this.lastWriteError;
+    this.lastWriteError = null;
+    throw err;
   }
 
   private async flushPending(): Promise<void> {
     const prev = this.pending;
     this.pending = null;
-    this.clearIdleFlush();
     if (prev) await this.writeMerged(prev);
   }
 
@@ -100,8 +109,15 @@ export class CoalescingJsonlWriter {
 
   private writeEvent(event: KernelEvent): Promise<void> {
     const line = `${JSON.stringify(event)}\n`;
-    const write = this.writeChain.then(() => appendFile(this.path, line, "utf8"));
-    this.writeChain = write.catch(() => {});
+    const write = this.writeChain.then(() => this.append(this.path, line, "utf8"));
+    this.writeChain = write.then(
+      () => {
+        this.lastWriteError = null;
+      },
+      (err: unknown) => {
+        this.lastWriteError = err instanceof Error ? err : new Error(String(err));
+      },
+    );
     return write;
   }
 }

@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
 import { getPlatformToken } from "./api-token";
+import {
+  connectTaskStreamAtUrl,
+  type ConnectTaskStreamOptions,
+  type TaskStreamEvent,
+} from "./task-stream";
+
+export {
+  connectTaskStreamAtUrl,
+  nextTaskStreamRetryMs,
+} from "./task-stream";
+export type { ConnectTaskStreamOptions, TaskStreamEvent, TaskStreamSocket } from "./task-stream";
 
 export type HubMessage = { type: string; payload: unknown };
 
@@ -76,36 +87,20 @@ function teardownIfIdle() {
   setStatus("offline");
 }
 
-/** Verbose kernel stream: token-level engine.chunk for the open task. */
-export function connectTaskStream(
-  taskId: string,
-  onEvent: (event: { seq: number; ts: string; type: string; payload: unknown }) => void,
-): () => void {
+function taskStreamUrl(taskId: string): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const token = getPlatformToken();
   const query = token ? `?token=${encodeURIComponent(token)}` : "";
-  const ws = new WebSocket(
-    `${proto}://${location.host}/api/tasks/${encodeURIComponent(taskId)}/stream${query}`,
-  );
-  ws.onmessage = (ev) => {
-    let event: { seq?: number; ts?: string; type?: string; payload?: unknown };
-    try {
-      event = JSON.parse(String(ev.data)) as { seq?: number; ts?: string; type?: string; payload?: unknown };
-    } catch {
-      return;
-    }
-    if (event.seq == null || !event.type) return;
-    onEvent({
-      seq: event.seq,
-      ts: event.ts ?? new Date().toISOString(),
-      type: event.type,
-      payload: event.payload,
-    });
-  };
-  return () => {
-    ws.onmessage = null;
-    ws.close();
-  };
+  return `${proto}://${location.host}/api/tasks/${encodeURIComponent(taskId)}/stream${query}`;
+}
+
+/** Verbose kernel stream: token-level engine.chunk for the open task. */
+export function connectTaskStream(
+  taskId: string,
+  onEvent: (event: TaskStreamEvent) => void,
+  opts: ConnectTaskStreamOptions = {},
+): () => void {
+  return connectTaskStreamAtUrl(opts.url ?? taskStreamUrl(taskId), onEvent, opts);
 }
 
 export function connectHub(onMessage: (msg: HubMessage) => void): () => void {

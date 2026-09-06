@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { InterventionRequest, KernelEvent, KernelEventType } from "@devtools/shared";
 import { CoalescingJsonlWriter } from "./coalescing-jsonl-writer.js";
 
-export { CoalescingJsonlWriter, EVENT_CHUNK_COALESCE_IDLE_MS } from "./coalescing-jsonl-writer.js";
+export { CoalescingJsonlWriter } from "./coalescing-jsonl-writer.js";
 
 export type TaskStatus =
   | "created"
@@ -272,6 +272,20 @@ export class EventLog {
     return new EventLog(taskId, taskDir, startSeq);
   }
 
+  /** Replay jsonl without opening a writable persist sink. */
+  static async readFile(taskDir: string, afterSeq = 0): Promise<KernelEvent[]> {
+    try {
+      const raw = await readFile(join(taskDir, "events.jsonl"), "utf8");
+      return raw
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as KernelEvent)
+        .filter((e) => e.seq > afterSeq);
+    } catch {
+      return [];
+    }
+  }
+
   on(listener: (e: KernelEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -318,17 +332,21 @@ export class EventLog {
   }
 
   async readAfter(afterSeq: number): Promise<KernelEvent[]> {
-    await this.flush();
+    await this.sink.waitForWrites();
+    let rows: KernelEvent[] = [];
     try {
       const raw = await readFile(this.path, "utf8");
-      return raw
+      rows = raw
         .split("\n")
         .filter(Boolean)
         .map((l) => JSON.parse(l) as KernelEvent)
         .filter((e) => e.seq > afterSeq);
     } catch {
-      return [];
+      rows = [];
     }
+    const pending = this.sink.peekPending();
+    if (pending && pending.seq > afterSeq) rows.push(pending);
+    return rows;
   }
 }
 

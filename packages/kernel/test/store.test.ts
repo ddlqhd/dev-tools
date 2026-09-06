@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KernelStore, EventLog, ArtifactStore, CoalescingJsonlWriter, type TaskStatus } from "../src/store/index.js";
@@ -116,7 +116,7 @@ test("EventLog: append, seq continuity, readAfter", async () => {
 test("CoalescingJsonlWriter: persist receiver merges tokens, not the emitter", async () => {
   const dirs = await store.ensureTaskDirs("t-sink");
   const path = join(dirs.taskDir, "events.jsonl");
-  const sink = new CoalescingJsonlWriter(path, -1);
+  const sink = new CoalescingJsonlWriter(path);
   const ev = (seq: number, kind: string, extra: Record<string, unknown>) => ({
     seq,
     taskId: "t-sink",
@@ -175,6 +175,48 @@ test("EventLog: pushes every token live; persist receiver coalesces jsonl", asyn
   ]);
 });
 
+test("EventLog: task.completed flushes the pending text buffer to disk", async () => {
+  const dirs = await store.ensureTaskDirs("t-end");
+  const log = await EventLog.open("t-end", dirs.taskDir);
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "text", text: "完整段落" } });
+  await log.emit("task.completed", {});
+  const raw = await readFile(join(dirs.taskDir, "events.jsonl"), "utf8");
+  const lines = raw.trim().split("\n").map((l) => JSON.parse(l) as { type: string; payload: { chunk?: { text?: string } } });
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0]!.payload.chunk?.text, "完整段落");
+  assert.equal(lines[1]!.type, "task.completed");
+});
+
+test("EventLog: explicit flush persists pending without a trailing event", async () => {
+  const dirs = await store.ensureTaskDirs("t-flush");
+  const log = await EventLog.open("t-flush", dirs.taskDir);
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "thinking", text: "未完成" } });
+  await log.flush();
+  const raw = await readFile(join(dirs.taskDir, "events.jsonl"), "utf8");
+  const lines = raw.trim().split("\n").map((l) => JSON.parse(l) as { payload: { chunk: { text: string } } });
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0]!.payload.chunk.text, "未完成");
+});
+
+test("EventLog: readAfter does not flush pending, later same-kind tokens still merge", async () => {
+  const dirs = await store.ensureTaskDirs("t-pending");
+  const log = await EventLog.open("t-pending", dirs.taskDir);
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "text", text: "先" } });
+  const mid = await log.readAfter(0);
+  assert.equal(mid.length, 1);
+  assert.equal((mid[0]!.payload as { chunk: { text: string } }).chunk.text, "先");
+
+  const onDisk = await readFile(join(dirs.taskDir, "events.jsonl"), "utf8").catch(() => "");
+  assert.equal(onDisk.trim(), "");
+
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "text", text: "定位" } });
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "toolUse", tool: "Grep", summary: "x" } });
+  const disk = await log.readAfter(0);
+  assert.equal(disk.length, 2);
+  assert.equal((disk[0]!.payload as { chunk: { text: string } }).chunk.text, "先定位");
+  assert.equal((disk[1]!.payload as { chunk: { kind: string } }).chunk.kind, "toolUse");
+});
+
 test("EventLog: does not merge different nodes or non-text kinds", async () => {
   const dirs = await store.ensureTaskDirs("t-nomerge");
   const log = await EventLog.open("t-nomerge", dirs.taskDir);
@@ -189,6 +231,37 @@ test("EventLog: does not merge different nodes or non-text kinds", async () => {
     disk.map((e) => (e.payload as { chunk: { kind: string; text?: string } }).chunk.kind),
     ["text", "text", "toolUse", "toolUse"],
   );
+});
+
+test("CoalescingJsonlWriter: flush rejects after a failed append", async () => {
+  const dirs = await store.ensureTaskDirs("t-write-fail");
+  const path = join(dirs.taskDir, "events.jsonl");
+  const sink = new CoalescingJsonlWriter(path, async () => {
+    throw new Error("disk full");
+  });
+  await sink.accept({
+    seq: 1,
+    taskId: "t-write-fail",
+    ts: "2026-09-06T00:00:00.000Z",
+    type: "task.started",
+    payload: {},
+  }).catch(() => undefined);
+  await assert.rejects(() => sink.flush(), /disk full/);
+});
+
+test("EventLog.readFile: replays jsonl without writing", async () => {
+  const dirs = await store.ensureTaskDirs("t-readonly");
+  const path = join(dirs.taskDir, "events.jsonl");
+  await writeFile(
+    path,
+    `${JSON.stringify({ seq: 1, taskId: "t-readonly", ts: "2026-09-06T00:00:00.000Z", type: "task.started", payload: {} })}\n`,
+    "utf8",
+  );
+  const before = await readFile(path, "utf8");
+  const rows = await EventLog.readFile(dirs.taskDir, 0);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.type, "task.started");
+  assert.equal(await readFile(path, "utf8"), before);
 });
 
 test("EventLog: findUnresolvedIntervention", async () => {

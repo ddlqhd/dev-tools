@@ -61,9 +61,9 @@ export async function readTaskDetail(
 ): Promise<{ detail: TaskDetail; events: KernelEvent[] }> {
   const snap = await runtime.getSnapshot(taskId);
   const live = runtime.getHandle(taskId)?.events;
-  if (live) await live.flush();
-  const log = live ?? (await EventLog.open(taskId, runtime.store.taskDir(taskId)));
-  const events = await log.readAfter(0);
+  const events = live
+    ? await live.readAfter(0)
+    : await EventLog.readFile(runtime.store.taskDir(taskId), 0);
   return { detail: buildTaskDetail(snap, events), events };
 }
 

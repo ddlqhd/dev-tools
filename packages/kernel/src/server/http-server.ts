@@ -91,6 +91,7 @@ export async function startKernelServer(opts: ServeOptions): Promise<ServeHandle
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
+      await runtime.flushEventLogs();
       try {
         await unlink(join(codeloopRoot, "kernel.lock"));
       } catch {
@@ -308,8 +309,10 @@ async function handleHttp(
       }
       const after = Number(url.searchParams.get("after") ?? "0");
       const live = runtime.getHandle(taskId)?.events;
-      const log = live ?? (await EventLog.open(taskId, runtime.store.taskDir(taskId)));
-      json(res, 200, { events: await log.readAfter(after) });
+      const events = live
+        ? await live.readAfter(after)
+        : await EventLog.readFile(runtime.store.taskDir(taskId), after);
+      json(res, 200, { events });
       return;
     }
 
