@@ -76,6 +76,38 @@ function teardownIfIdle() {
   setStatus("offline");
 }
 
+/** Verbose kernel stream: token-level engine.chunk for the open task. */
+export function connectTaskStream(
+  taskId: string,
+  onEvent: (event: { seq: number; ts: string; type: string; payload: unknown }) => void,
+): () => void {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const token = getPlatformToken();
+  const query = token ? `?token=${encodeURIComponent(token)}` : "";
+  const ws = new WebSocket(
+    `${proto}://${location.host}/api/tasks/${encodeURIComponent(taskId)}/stream${query}`,
+  );
+  ws.onmessage = (ev) => {
+    let event: { seq?: number; ts?: string; type?: string; payload?: unknown };
+    try {
+      event = JSON.parse(String(ev.data)) as { seq?: number; ts?: string; type?: string; payload?: unknown };
+    } catch {
+      return;
+    }
+    if (event.seq == null || !event.type) return;
+    onEvent({
+      seq: event.seq,
+      ts: event.ts ?? new Date().toISOString(),
+      type: event.type,
+      payload: event.payload,
+    });
+  };
+  return () => {
+    ws.onmessage = null;
+    ws.close();
+  };
+}
+
 export function connectHub(onMessage: (msg: HubMessage) => void): () => void {
   messageListeners.add(onMessage);
   ensureConnected();

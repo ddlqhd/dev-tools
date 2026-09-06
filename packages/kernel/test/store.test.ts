@@ -1,9 +1,9 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { KernelStore, EventLog, ArtifactStore, type TaskStatus } from "../src/store/index.js";
+import { KernelStore, EventLog, ArtifactStore, CoalescingJsonlWriter, type TaskStatus } from "../src/store/index.js";
 
 let dir: string;
 let store: KernelStore;
@@ -111,6 +111,84 @@ test("EventLog: append, seq continuity, readAfter", async () => {
 
   const after = await log2.readAfter(1);
   assert.deepEqual(after.map((e) => e.type), ["node.started", "task.completed"]);
+});
+
+test("CoalescingJsonlWriter: persist receiver merges tokens, not the emitter", async () => {
+  const dirs = await store.ensureTaskDirs("t-sink");
+  const path = join(dirs.taskDir, "events.jsonl");
+  const sink = new CoalescingJsonlWriter(path, -1);
+  const ev = (seq: number, kind: string, extra: Record<string, unknown>) => ({
+    seq,
+    taskId: "t-sink",
+    ts: "2026-09-05T00:00:00.000Z",
+    type: "engine.chunk" as const,
+    payload: { nodeId: "plan", chunk: { kind, ...extra } },
+  });
+
+  await sink.accept(ev(1, "text", { text: "先" }));
+  await sink.accept(ev(2, "text", { text: "定位" }));
+  await sink.accept(ev(3, "thinking", { text: "嗯" }));
+  await sink.accept(ev(4, "thinking", { text: "。" }));
+  await sink.accept(ev(5, "toolUse", { tool: "Read", summary: "a.ts" }));
+  await sink.flush();
+
+  const lines = (await readFile(path, "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 3);
+  assert.equal(lines[0]!.payload.chunk.text, "先定位");
+  assert.equal(lines[1]!.payload.chunk.text, "嗯。");
+  assert.equal(lines[2]!.payload.chunk.kind, "toolUse");
+});
+
+test("EventLog: pushes every token live; persist receiver coalesces jsonl", async () => {
+  const dirs = await store.ensureTaskDirs("t-coalesce");
+  const log = await EventLog.open("t-coalesce", dirs.taskDir);
+  const live: string[] = [];
+  log.on((e) => {
+    if (e.type === "engine.chunk") {
+      const chunk = (e.payload as { chunk?: { kind?: string; text?: string } }).chunk;
+      live.push(`${chunk?.kind}:${chunk?.text ?? ""}`);
+    }
+  });
+
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "thinking", text: "先" } });
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "thinking", text: "想" } });
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "text", text: "写" } });
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "text", text: "下" } });
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "toolUse", tool: "Read", summary: "a.ts" } });
+  await log.emit("node.completed", { nodeId: "plan" });
+
+  assert.deepEqual(live, ["thinking:先", "thinking:想", "text:写", "text:下", "toolUse:"]);
+
+  const disk = await log.readAfter(0);
+  assert.deepEqual(
+    disk.map((e) => e.type),
+    ["engine.chunk", "engine.chunk", "engine.chunk", "node.completed"],
+  );
+  const chunks = disk.filter((e) => e.type === "engine.chunk").map((e) => {
+    const chunk = (e.payload as { chunk: { kind: string; text?: string; tool?: string } }).chunk;
+    return { seq: e.seq, kind: chunk.kind, text: chunk.text, tool: chunk.tool };
+  });
+  assert.deepEqual(chunks, [
+    { seq: 2, kind: "thinking", text: "先想", tool: undefined },
+    { seq: 4, kind: "text", text: "写下", tool: undefined },
+    { seq: 5, kind: "toolUse", text: undefined, tool: "Read" },
+  ]);
+});
+
+test("EventLog: does not merge different nodes or non-text kinds", async () => {
+  const dirs = await store.ensureTaskDirs("t-nomerge");
+  const log = await EventLog.open("t-nomerge", dirs.taskDir);
+  await log.emit("engine.chunk", { nodeId: "plan", chunk: { kind: "text", text: "a" } });
+  await log.emit("engine.chunk", { nodeId: "code", chunk: { kind: "text", text: "b" } });
+  await log.emit("engine.chunk", { nodeId: "code", chunk: { kind: "toolUse", tool: "Grep", summary: "x" } });
+  await log.emit("engine.chunk", { nodeId: "code", chunk: { kind: "toolUse", tool: "Read", summary: "y" } });
+
+  const disk = await log.readAfter(0);
+  assert.equal(disk.length, 4);
+  assert.deepEqual(
+    disk.map((e) => (e.payload as { chunk: { kind: string; text?: string } }).chunk.kind),
+    ["text", "text", "toolUse", "toolUse"],
+  );
 });
 
 test("EventLog: findUnresolvedIntervention", async () => {

@@ -1,7 +1,10 @@
-import { mkdir, appendFile, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { InterventionRequest, KernelEvent, KernelEventType } from "@devtools/shared";
+import { CoalescingJsonlWriter } from "./coalescing-jsonl-writer.js";
+
+export { CoalescingJsonlWriter, EVENT_CHUNK_COALESCE_IDLE_MS } from "./coalescing-jsonl-writer.js";
 
 export type TaskStatus =
   | "created"
@@ -241,8 +244,8 @@ export class EventLog {
   private seq = 0;
   private readonly path: string;
   private readonly listeners = new Set<(e: KernelEvent) => void>();
-  /** Serializes appends: engine chunk callbacks emit without awaiting. */
-  private writeChain: Promise<void> = Promise.resolve();
+  /** Disk receiver — merges adjacent thinking/text; not a live subscriber. */
+  private readonly sink: CoalescingJsonlWriter;
 
   constructor(
     private readonly taskId: string,
@@ -251,6 +254,7 @@ export class EventLog {
   ) {
     this.path = join(taskDir, "events.jsonl");
     this.seq = startSeq;
+    this.sink = new CoalescingJsonlWriter(this.path);
   }
 
   static async open(taskId: string, taskDir: string): Promise<EventLog> {
@@ -282,14 +286,14 @@ export class EventLog {
       type,
       payload,
     };
-    const line = `${JSON.stringify(event)}\n`;
-    const write = this.writeChain.then(() => appendFile(this.path, line, "utf8"));
-    // Keep the chain alive on failure so one bad write cannot stall later events.
-    this.writeChain = write.catch(() => {});
-
     for (const listener of this.listeners) listener(event as KernelEvent);
-    await write;
+    await this.sink.accept(event as KernelEvent);
     return event;
+  }
+
+  /** Flush the persist receiver so jsonl includes the latest merged chunk. */
+  async flush(): Promise<void> {
+    await this.sink.flush();
   }
 
   /**
@@ -314,6 +318,7 @@ export class EventLog {
   }
 
   async readAfter(afterSeq: number): Promise<KernelEvent[]> {
+    await this.flush();
     try {
       const raw = await readFile(this.path, "utf8");
       return raw

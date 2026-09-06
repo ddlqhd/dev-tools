@@ -8,12 +8,14 @@ import {
 import {
   api,
   connectHub,
+  connectTaskStream,
   type KernelTaskSnapshot,
   type Repo,
   type Task,
   type TaskDetail,
   type TaskEvent,
 } from "./api";
+import { mergePersistedAndLive } from "./merge-events";
 
 export function detailFromEvents(task: Task, repo: Repo | null, events: TaskEvent[]): TaskDetail {
   return buildTaskDetail(
@@ -55,7 +57,7 @@ export function useTaskLive(id: string) {
     setRepo(info.repo);
     setKernel(info.kernel);
     const ev = await api.listEvents(id);
-    setEvents(ev.events);
+    setEvents((prev) => mergePersistedAndLive(ev.events, prev));
     const fallback = detailFromEvents(info.task, info.repo, ev.events);
     try {
       const d = await api.getDetail(id);
@@ -67,6 +69,7 @@ export function useTaskLive(id: string) {
 
   useEffect(() => {
     setDetail(null);
+    setEvents([]);
     setError(null);
     void reload().catch((e: Error) => setError(e.message));
 
@@ -77,6 +80,29 @@ export function useTaskLive(id: string) {
         void reload().catch(() => undefined);
       }, 400);
     };
+
+    const appendEvent = (row: TaskEvent) => {
+      setEvents((prev) => (prev.some((e) => e.seq === row.seq) ? prev : [...prev, row]));
+    };
+
+    const offStream = connectTaskStream(id, (event) => {
+      appendEvent({
+        task_id: id,
+        seq: event.seq,
+        ts: event.ts,
+        type: event.type,
+        payload:
+          typeof event.payload === "string" ? event.payload : JSON.stringify(event.payload ?? {}),
+      });
+      if (
+        event.type === "node.started" ||
+        event.type === "node.completed" ||
+        event.type === "task.completed" ||
+        event.type === "task.failed"
+      ) {
+        scheduleDetail();
+      }
+    });
 
     const off = connectHub((msg) => {
       if (msg.type === "task.updated") {
@@ -119,6 +145,7 @@ export function useTaskLive(id: string) {
     });
     return () => {
       if (timer) clearTimeout(timer);
+      offStream();
       off();
     };
   }, [id, reload]);
@@ -128,7 +155,7 @@ export function useTaskLive(id: string) {
     const tick = setInterval(() => {
       void api
         .listEvents(id)
-        .then((ev) => setEvents(ev.events))
+        .then((ev) => setEvents((prev) => mergePersistedAndLive(ev.events, prev)))
         .catch(() => undefined);
     }, 1500);
     return () => clearInterval(tick);

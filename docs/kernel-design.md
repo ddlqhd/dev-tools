@@ -439,7 +439,7 @@ export type KernelEventType =
 
 约定：
 
-- `engine.chunk` 量大，事件流订阅可带 `?verbose=false` 过滤，只留节点级事件；JSONL 中始终全量。
+- `engine.chunk` 量大，事件流订阅可带 `?verbose=false` 过滤，只留节点级事件。verbose 流仍按 token 推送 `thinking`/`text`；JSONL 将相邻同 kind 片段合并后再落盘（不同 kind 不合并）。
 - 消费方通过 `seq` 做幂等与断线重放：`GET /tasks/:id/events?after=<seq>`。
 
 ## 7. 控制 API（`codeloop serve`）

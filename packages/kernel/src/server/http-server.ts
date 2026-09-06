@@ -307,7 +307,8 @@ async function handleHttp(
         return;
       }
       const after = Number(url.searchParams.get("after") ?? "0");
-      const log = await EventLog.open(taskId, runtime.store.taskDir(taskId));
+      const live = runtime.getHandle(taskId)?.events;
+      const log = live ?? (await EventLog.open(taskId, runtime.store.taskDir(taskId)));
       json(res, 200, { events: await log.readAfter(after) });
       return;
     }

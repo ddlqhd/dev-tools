@@ -126,7 +126,7 @@ export type KernelTaskSnapshot = {
 export type TaskDetail = Omit<SharedTaskDetail, "workflow"> & { workflow?: WorkflowView };
 
 export { getPlatformToken };
-export { connectHub, subscribeHubStatus, useHubStatus, useHubSync } from "./hub";
+export { connectHub, connectTaskStream, subscribeHubStatus, useHubStatus, useHubSync } from "./hub";
 export type { HubMessage, HubStatus } from "./hub";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
