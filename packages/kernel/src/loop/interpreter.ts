@@ -3,6 +3,7 @@ import {
   type FlowStep,
   type InterventionDecision,
   type InterventionRequest,
+  type LoopExhaustion,
   type LoopStackEntry,
   type NodeSpec,
   type ReviewComment,
@@ -33,6 +34,23 @@ const runners: Record<string, NodeRunner> = {
 
 export type AbortIntent = "none" | "pause" | "abort";
 
+export interface FlowCursor {
+  flowIndex: number;
+  loopExhaustion?: LoopExhaustion;
+}
+
+export function parseFlowCursor(raw: string | null | undefined): FlowCursor {
+  try {
+    const parsed = JSON.parse(raw || '{"flowIndex":0}') as Partial<FlowCursor>;
+    return {
+      flowIndex: typeof parsed.flowIndex === "number" ? parsed.flowIndex : 0,
+      ...(parsed.loopExhaustion ? { loopExhaustion: parsed.loopExhaustion } : {}),
+    };
+  } catch {
+    return { flowIndex: 0 };
+  }
+}
+
 export interface ResumeState {
   flowIndex: number;
   loopStack: LoopStackEntry[];
@@ -40,6 +58,7 @@ export interface ResumeState {
   /** Re-run this node (and continue); for loop bodies, loopStack already set. */
   resumeNodeId: string;
   instructions: string[];
+  loopExhaustion?: LoopExhaustion;
 }
 
 export interface InterpreterOptions {
@@ -69,6 +88,7 @@ export class PipelineInterpreter {
   private flowIndex = 0;
   /** When set, next runFlow iteration should start by running this node inside current step. */
   private resumeNodeId: string | null = null;
+  private pendingLoopExhaustion: LoopExhaustion | null = null;
 
   constructor(private readonly opts: InterpreterOptions) {
     if (opts.resume) {
@@ -77,6 +97,7 @@ export class PipelineInterpreter {
       this.nodeOutcomes = { ...opts.resume.nodeOutcomes };
       this.instructionQueue = [...opts.resume.instructions];
       this.resumeNodeId = opts.resume.resumeNodeId;
+      this.pendingLoopExhaustion = opts.resume.loopExhaustion ?? null;
     }
   }
 
@@ -303,6 +324,22 @@ export class PipelineInterpreter {
       if (passed) return;
     }
 
+    // If next flow step is a gate, skip asking for a limit intervention and let the gate
+    // handle approval with loopExhaustion context instead of prompting twice.
+    const nextStep = this.opts.pipeline.flow[flowIndex + 1];
+    if (nextStep?.kind === "node" && this.opts.pipeline.nodes[nextStep.nodeId]?.type === "gate") {
+      this.pendingLoopExhaustion = {
+        loopId: step.id,
+        iteration: step.maxIterations,
+        maxIterations: step.maxIterations,
+      };
+      await this.opts.events.emit("log", {
+        level: "info",
+        message: `Loop ${step.id} reached maxIterations=${step.maxIterations}; proceeding to gate ${nextStep.nodeId}`,
+      });
+      return;
+    }
+
     const summary = `Loop ${step.id} reached maxIterations=${step.maxIterations}`;
     let decision: InterventionDecision;
     try {
@@ -384,7 +421,10 @@ export class PipelineInterpreter {
       head_commit: head,
       engine_session_id: null,
       instructions: JSON.stringify(this.instructionQueue),
-      flow_cursor: JSON.stringify({ flowIndex }),
+      flow_cursor: JSON.stringify({
+        flowIndex,
+        ...(this.pendingLoopExhaustion ? { loopExhaustion: this.pendingLoopExhaustion } : {}),
+      } satisfies FlowCursor),
       node_outcomes: JSON.stringify(this.nodeOutcomes),
       pending_intervention: null,
       updated_at: new Date().toISOString(),
@@ -407,6 +447,12 @@ export class PipelineInterpreter {
       nodeOutcomes: this.nodeOutcomes,
     };
 
+    let loopExhaustion: LoopExhaustion | undefined;
+    if (spec.type === "gate" && this.pendingLoopExhaustion) {
+      loopExhaustion = this.pendingLoopExhaustion;
+      this.pendingLoopExhaustion = null;
+    }
+
     const ctx: NodeContext & { _nodeId: string } = {
       _nodeId: nodeId,
       task,
@@ -415,6 +461,7 @@ export class PipelineInterpreter {
       engine,
       engineType,
       instructions,
+      loopExhaustion: loopExhaustion ?? undefined,
       config: this.opts.config,
       signal: this.opts.signal,
       emit: async (event) => {

@@ -42,11 +42,18 @@ export type InterventionDecision =
 
 export type InterventionKind = "gate" | "limit" | "error";
 
+export interface LoopExhaustion {
+  loopId: string;
+  iteration: number;
+  maxIterations: number;
+}
+
 export interface InterventionRequest {
   requestId: string;
   nodeId: string;
   kind: InterventionKind;
   summary: string;
+  loopExhaustion?: LoopExhaustion;
   /** Artifact the decision may edit in place (gate with outputs, e.g. planDoc). */
   artifactKey?: string;
   /** Auto-resolve the intervention after this long (parsed from node spec.timeout). */

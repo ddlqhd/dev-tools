@@ -3212,6 +3212,55 @@ pre.artifact {
   margin: 0 0 8px;
 }
 
+.plan-exhaustion-banner {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--attention-fg) 10%, var(--canvas-default));
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--attention-fg) 35%, var(--border-default));
+}
+
+.plan-exhaustion-banner > strong {
+  display: block;
+  color: var(--fg-default);
+}
+
+.plan-exhaustion-banner > .plan-hint {
+  margin: 4px 0 0;
+  font-size: var(--text-small);
+}
+
+.plan-exhaustion-comments {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--attention-fg) 20%, transparent);
+}
+
+.plan-exhaustion-comments > strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--text-small);
+}
+
+.plan-exhaustion-comments ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: var(--text-small);
+}
+
+.plan-exhaustion-comments li {
+  margin-bottom: 4px;
+}
+
+.plan-exhaustion-comments .suggestion {
+  margin-top: 2px;
+}
+
+.plan-exhaustion-comments > .muted {
+  margin: 0;
+  font-size: var(--text-small);
+}
+
 .plan-editor {
   width: 100%;
   min-height: 240px;

@@ -477,3 +477,163 @@ test("review-only on a dirty inplace checkout snapshots into an isolated worktre
     await cleanupRepo(repo);
   }
 });
+
+test("planLoop exhaustion: skips limit intervention and directly asks for gate with loopExhaustion", { timeout: 60_000 }, async () => {
+  const repo = await freshRepo();
+  const state = await makeStubState({ reviewAlwaysFail: true });
+  try {
+    const seen: KernelEvent[] = [];
+    const interventions: InterventionRequest[] = [];
+    const result = await createAndRunTask({
+      ...runOpts(repo, state, { pipeline: "plan-only", autoApproveGates: false }),
+      onEvent: (e) => seen.push(e),
+      onIntervention: async (req) => {
+        interventions.push(req);
+        return { action: "approve" };
+      },
+    });
+
+    assert.equal(result.status, "completed", result.error);
+
+    // Verify no limit intervention was requested
+    const limitReqs = interventions.filter((r) => r.kind === "limit");
+    assert.equal(limitReqs.length, 0, "should not have emitted a limit intervention");
+
+    // Verify exactly one gate intervention was requested, with loopExhaustion
+    const gateReqs = interventions.filter((r) => r.kind === "gate");
+    assert.equal(gateReqs.length, 1, "expected exactly one gate intervention");
+    assert.deepEqual(gateReqs[0]!.loopExhaustion, {
+      loopId: "planLoop",
+      iteration: 3,
+      maxIterations: 3,
+    });
+    assert.match(gateReqs[0]!.summary, /planLoop reached maxIterations=3; review did not pass/);
+
+    // Verify events
+    const reqEvents = seen.filter((e) => e.type === "intervention.required");
+    assert.equal(reqEvents.length, 1);
+    const payload = reqEvents[0]!.payload as InterventionRequest;
+    assert.equal(payload.kind, "gate");
+    assert.deepEqual(payload.loopExhaustion, {
+      loopId: "planLoop",
+      iteration: 3,
+      maxIterations: 3,
+    });
+  } finally {
+    await cleanupRepo(repo);
+    await rm(state, { force: true });
+  }
+});
+
+test("planLoop exhaustion: autoApproveGates auto-approves gate and completes", { timeout: 60_000 }, async () => {
+  const repo = await freshRepo();
+  const state = await makeStubState({ reviewAlwaysFail: true });
+  try {
+    const seen: KernelEvent[] = [];
+    const result = await createAndRunTask({
+      ...runOpts(repo, state, { pipeline: "plan-only", autoApproveGates: true }),
+      onEvent: (e) => seen.push(e),
+    });
+
+    assert.equal(result.status, "completed", result.error);
+
+    const reqEvents = seen.filter((e) => e.type === "intervention.required");
+    assert.equal(reqEvents.length, 0, "autoApproveGates should not require intervention");
+
+    const warnLog = seen.find(
+      (e) =>
+        e.type === "log" &&
+        (e.payload as { level?: string; message?: string }).level === "warn" &&
+        (e.payload as { message?: string }).message?.includes("Gate auto-approved despite loop exhaustion"),
+    );
+    assert.ok(warnLog, "should emit a warning log for gate auto-approval under loop exhaustion");
+  } finally {
+    await cleanupRepo(repo);
+    await rm(state, { force: true });
+  }
+});
+
+test("planLoop exhaustion: gate reject loops back into planLoop and completes", { timeout: 60_000 }, async () => {
+  const repo = await freshRepo();
+  const state = await makeStubState({ reviewAlwaysFail: true });
+  try {
+    let gateCalls = 0;
+    const result = await createAndRunTask({
+      ...runOpts(repo, state, { pipeline: "plan-only", autoApproveGates: false }),
+      onIntervention: async (req) => {
+        gateCalls += 1;
+        assert.equal(req.kind, "gate");
+        assert.ok(req.loopExhaustion);
+        if (gateCalls === 1) {
+          return { action: "reject", comments: reviewComments(["plan needs more detail"]) };
+        }
+        return { action: "approve" };
+      },
+    });
+    assert.equal(result.status, "completed", result.error);
+    assert.equal(gateCalls, 2, "gate should be hit twice (exhaust → reject → re-exhaust → approve)");
+  } finally {
+    await cleanupRepo(repo);
+    await rm(state, { force: true });
+  }
+});
+
+test("planLoop exhaustion: pause and resume keeps loopExhaustion on the gate", { timeout: 60_000 }, async () => {
+  const repo = await freshRepo();
+  const state = await makeStubState({ reviewAlwaysFail: true });
+  try {
+    const runtime = await KernelRuntime.open(repo);
+    try {
+      process.env.CODELOOP_STUB_STATE = state;
+      const handle = await runtime.createTask({
+        requirement: "implement the stub feature",
+        repoPath: repo,
+        inplace: true,
+        pipeline: "plan-only",
+        parkInterventions: true,
+      });
+      const events: KernelEvent[] = [];
+      handle.onEvent((e) => events.push(e));
+      const runPromise = handle.start();
+
+      await waitForEvent(events, (e) => e.type === "intervention.required");
+      const first = handle.getPendingIntervention();
+      assert.equal(first?.kind, "gate");
+      assert.deepEqual(first?.loopExhaustion, {
+        loopId: "planLoop",
+        iteration: 3,
+        maxIterations: 3,
+      });
+
+      const cp = runtime.store.getCheckpoint(handle.taskId);
+      const cursor = JSON.parse(cp?.flow_cursor || "{}") as { loopExhaustion?: unknown };
+      assert.deepEqual(cursor.loopExhaustion, first?.loopExhaustion);
+
+      await handle.pause();
+      const paused = await runPromise;
+      assert.equal(paused.status, "suspended");
+
+      events.splice(0);
+      await handle.kickoffResume();
+      await waitForEvent(events, (e) => e.type === "intervention.required");
+      const resumed = handle.getPendingIntervention();
+      assert.equal(resumed?.kind, "gate");
+      assert.deepEqual(resumed?.loopExhaustion, {
+        loopId: "planLoop",
+        iteration: 3,
+        maxIterations: 3,
+      });
+
+      const applied = await handle.applyIntervention(resumed!.requestId, { action: "approve" });
+      assert.equal(applied.ok, true);
+      const finished = await handle.wait();
+      assert.equal(finished.status, "completed", finished.error);
+    } finally {
+      runtime.close();
+    }
+  } finally {
+    await cleanupRepo(repo);
+    await rm(state, { force: true });
+  }
+});
+

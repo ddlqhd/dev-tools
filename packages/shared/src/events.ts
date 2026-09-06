@@ -1,6 +1,5 @@
-import type { EngineChunk, EngineTurnUsage } from "./types.js";
+import type { EngineChunk, EngineTurnUsage, InterventionDecision, LoopExhaustion } from "./types.js";
 import type { ReviewComment } from "./review.js";
-import type { InterventionDecision } from "./types.js";
 
 export interface KernelEvent<T = unknown> {
   seq: number;
@@ -103,6 +102,8 @@ export interface InterventionRequiredPayload {
   nodeId: string;
   kind: "gate" | "limit" | "error";
   summary: string;
+  loopExhaustion?: LoopExhaustion;
+  artifactKey?: string;
 }
 
 export interface InterventionResolvedPayload {

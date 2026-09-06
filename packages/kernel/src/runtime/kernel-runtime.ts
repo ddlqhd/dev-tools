@@ -33,6 +33,7 @@ import {
 } from "../git/worktree.js";
 import { ArtifactStore, EventLog, KernelStore, type TaskRow } from "../store/index.js";
 import {
+  parseFlowCursor,
   PipelineInterpreter,
   type AbortIntent,
   type ResumeState,
@@ -273,6 +274,7 @@ export class TaskHandle {
     }
     const { resolve } = this.pending;
     this.pending = null;
+    this.clearCheckpointIntervention();
     this.runtime.clearIntervention(this.taskId);
     resolve(decision);
   }
@@ -420,7 +422,7 @@ export class TaskHandle {
       // continue
     }
 
-    const flowCursor = JSON.parse(cp.flow_cursor || '{"flowIndex":0}') as { flowIndex: number };
+    const flowCursor = parseFlowCursor(cp.flow_cursor);
     const loopStack = JSON.parse(cp.loop_stack || "[]") as LoopStackEntry[];
     const nodeOutcomes = JSON.parse(cp.node_outcomes || "{}") as Record<
       string,
@@ -429,11 +431,12 @@ export class TaskHandle {
     const instructions = JSON.parse(cp.instructions || "[]") as string[];
 
     this.start({
-      flowIndex: flowCursor.flowIndex ?? 0,
+      flowIndex: flowCursor.flowIndex,
       loopStack,
       nodeOutcomes,
       resumeNodeId: cp.node_id,
       instructions: [...instructions, ...this.externalInstructions.splice(0)],
+      loopExhaustion: flowCursor.loopExhaustion,
     });
   }
 
@@ -726,7 +729,11 @@ export class KernelRuntime {
         pendingIntervention = null;
       }
     }
-    if (!pendingIntervention && task.status === "suspended") {
+    // Skip event-log recovery while a live runner is in flight: after a live
+    // resolve the checkpoint is already cleared but intervention.resolved may
+    // not be flushed yet, and the log would revive the just-answered request.
+    // Attached-but-idle handles (daemon restart) still recover from the log.
+    if (!pendingIntervention && task.status === "suspended" && !this.handles.get(taskId)?.isRunning()) {
       const log = new EventLog(taskId, this.store.taskDir(taskId));
       pendingIntervention = await log.findUnresolvedIntervention();
     }

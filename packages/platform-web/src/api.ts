@@ -1,4 +1,4 @@
-import type { TaskDetail as SharedTaskDetail, WorkflowView } from "@devtools/shared";
+import type { LoopExhaustion, TaskDetail as SharedTaskDetail, WorkflowView } from "@devtools/shared";
 import { getPlatformToken } from "./api-token";
 
 export type {
@@ -120,7 +120,13 @@ export interface TaskEvent {
 
 export type KernelTaskSnapshot = {
   task?: { status?: string };
-  pendingIntervention?: { requestId?: string; kind?: string; summary?: string } | null;
+  pendingIntervention?: {
+    requestId?: string;
+    nodeId?: string;
+    kind?: string;
+    summary?: string;
+    loopExhaustion?: LoopExhaustion;
+  } | null;
 };
 
 /** Wire payload: older kernels omit `workflow`. */

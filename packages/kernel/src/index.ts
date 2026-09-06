@@ -13,7 +13,8 @@ export { loadPipeline, listBuiltinPipelines, parsePipelineYaml } from "./pipelin
 export { CursorAdapter, CURSOR_BIN } from "./engines/cursor/index.js";
 export { OpenCodeAdapter, OPENCODE_BIN } from "./engines/opencode/index.js";
 export { getEngineAdapter, resolveEngineType } from "./engines/registry.js";
-export { PipelineInterpreter } from "./loop/interpreter.js";
+export { PipelineInterpreter, parseFlowCursor } from "./loop/interpreter.js";
+export type { FlowCursor, ResumeState } from "./loop/interpreter.js";
 export { KernelStore, EventLog, ArtifactStore } from "./store/index.js";
 export type { EngineAdapter, EngineSession, EngineInfo } from "./engines/adapter.js";
 export { SuspendedError } from "./engines/adapter.js";

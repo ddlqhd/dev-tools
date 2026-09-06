@@ -2,6 +2,7 @@ import type {
   InterventionDecision,
   InterventionRequest,
   KernelEvent,
+  LoopExhaustion,
   LoopStackEntry,
   NodePrimitive,
   NodeSpec,
@@ -37,6 +38,7 @@ export interface NodeContext {
   engine?: EngineSession;
   engineType?: string;
   instructions: string[];
+  loopExhaustion?: LoopExhaustion;
   emit(event: Omit<KernelEvent, "seq" | "taskId" | "ts"> | { type: KernelEvent["type"]; payload: unknown }): Promise<void>;
   requestIntervention(req: InterventionRequest): Promise<InterventionDecision>;
   signal: AbortSignal;

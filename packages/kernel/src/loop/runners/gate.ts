@@ -9,21 +9,36 @@ export class GateNodeRunner implements NodeRunner {
 
   async run(spec: NodeSpec, ctx: NodeContext): Promise<NodeResult> {
     if (ctx.config.autoApproveGates) {
-      await ctx.emit({
-        type: "log",
-        payload: { level: "info", message: "Gate auto-approved (--no-gate / autoApproveGates)" },
-      });
+      if (ctx.loopExhaustion) {
+        await ctx.emit({
+          type: "log",
+          payload: {
+            level: "warn",
+            message: `Gate auto-approved despite loop exhaustion (${ctx.loopExhaustion.loopId} ${ctx.loopExhaustion.iteration}/${ctx.loopExhaustion.maxIterations}) (--no-gate / autoApproveGates)`,
+          },
+        });
+      } else {
+        await ctx.emit({
+          type: "log",
+          payload: { level: "info", message: "Gate auto-approved (--no-gate / autoApproveGates)" },
+        });
+      }
       return { outputs: {}, outcome: { approved: true, auto: true } };
     }
 
     const requestId = randomUUID();
     const timeoutMs = spec.timeout ? parseTimeout(spec.timeout) : undefined;
+    const summary = ctx.loopExhaustion
+      ? `${ctx.loopExhaustion.loopId} reached maxIterations=${ctx.loopExhaustion.maxIterations}; review did not pass`
+      : "Approval required before continuing";
+
     const decision = await ctx.requestIntervention({
       requestId,
       nodeId: nodeId(ctx),
       kind: "gate",
-      summary: "Approval required before continuing",
+      summary,
       artifactKey: spec.artifactKey ?? DEFAULT_ARTIFACT_KEY,
+      ...(ctx.loopExhaustion ? { loopExhaustion: ctx.loopExhaustion } : {}),
       ...(timeoutMs ? { timeoutMs, timeoutPolicy: spec.timeoutPolicy ?? "reject" } : {}),
     });
 

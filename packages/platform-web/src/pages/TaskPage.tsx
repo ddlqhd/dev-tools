@@ -4,6 +4,8 @@ import {
   buildWorkflowView,
   countWorkflowNodes,
   taskActionsEnabled,
+  ReviewResultSchema,
+  type ReviewComment,
   type TaskControlAction,
 } from "@devtools/shared";
 import { ArtifactPreview } from "../components/ArtifactPreview";
@@ -27,6 +29,12 @@ import { fmtBytes, fmtClock, fmtDuration, fmtUsage, stageLabelClass, stageToneCl
 import { useTaskLive } from "../useTaskLive";
 
 type TaskActions = Record<TaskControlAction, boolean>;
+
+function severityClass(severity: ReviewComment["severity"]): string {
+  if (severity === "blocker" || severity === "major") return "Label Label--danger";
+  if (severity === "minor") return "Label Label--attention";
+  return "Label";
+}
 
 const MENU_ACTIONS = [
   { key: "pause" as const, label: "暂停", run: (id: string) => api.pause(id) },
@@ -53,6 +61,9 @@ export function TaskPage() {
   const [planDoc, setPlanDoc] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [planComments, setPlanComments] = useState<ReviewComment[] | null>(null);
+  const [planCommentsSummary, setPlanCommentsSummary] = useState<string | null>(null);
+  const [planCommentsLoading, setPlanCommentsLoading] = useState(false);
 
   const loadArtifact = async (key: string, ext: string) => {
     try {
@@ -66,8 +77,13 @@ export function TaskPage() {
     }
   };
 
-  const pendingReqId = kernel?.pendingIntervention?.requestId;
-  const pendingIsLimit = kernel?.pendingIntervention?.kind === "limit";
+  const pendingIntervention = kernel?.pendingIntervention;
+  const pendingReqId = pendingIntervention?.requestId;
+  const pendingIsLimit = pendingIntervention?.kind === "limit";
+  const loopExhaustion = pendingIntervention?.loopExhaustion;
+  const loopExhaustionKey = loopExhaustion
+    ? `${loopExhaustion.loopId}:${loopExhaustion.iteration}/${loopExhaustion.maxIterations}`
+    : null;
   const hasPendingIntervention = !!pendingReqId;
   const bound = !!(task?.instance_id && task?.kernel_task_id);
   const kernelStatus = kernel?.task?.status ?? null;
@@ -95,15 +111,49 @@ export function TaskPage() {
     }
   }, [id]);
 
+  const loadPlanComments = useCallback(async () => {
+    if (!id) return;
+    setPlanCommentsLoading(true);
+    try {
+      const raw = await api.artifact(id, "planComments");
+      const parsed = ReviewResultSchema.safeParse(JSON.parse(raw));
+      if (!parsed.success) {
+        setPlanComments(null);
+        setPlanCommentsSummary(null);
+        return;
+      }
+      setPlanCommentsSummary(parsed.data.summary ?? null);
+      setPlanComments(parsed.data.comments.filter((c) => c.status === "open"));
+    } catch {
+      setPlanComments(null);
+      setPlanCommentsSummary(null);
+    } finally {
+      setPlanCommentsLoading(false);
+    }
+  }, [id]);
+
   useEffect(() => {
-    if (pendingReqId) void loadPlanDoc();
-    else setEditingPlan(false);
-  }, [pendingReqId, loadPlanDoc]);
+    if (pendingReqId) {
+      void loadPlanDoc();
+      if (loopExhaustionKey) {
+        void loadPlanComments();
+      } else {
+        setPlanComments(null);
+        setPlanCommentsSummary(null);
+      }
+    } else {
+      setEditingPlan(false);
+      setPlanComments(null);
+      setPlanCommentsSummary(null);
+    }
+  }, [pendingReqId, loopExhaustionKey, loadPlanDoc, loadPlanComments]);
 
   useEffect(() => {
     setPreview(null);
     setPlanDoc(null);
     setPlanError(null);
+    setPlanComments(null);
+    setPlanCommentsSummary(null);
   }, [id]);
 
   useEffect(() => {
@@ -259,19 +309,59 @@ export function TaskPage() {
           {pendingReqId && (
             <div className="Box task-intervene">
               <div className="Box-header">
-                <h2>{pendingIsLimit ? "循环已达上限" : "待审批"}</h2>
+                <h2>
+                  {pendingIsLimit
+                    ? "循环已达上限"
+                    : loopExhaustion
+                      ? "循环已满，待审批"
+                      : "待审批"}
+                </h2>
               </div>
               <div className="Box-body">
+                {loopExhaustion && (
+                  <div className="plan-exhaustion-banner">
+                    <strong>
+                      {loopExhaustion.loopId} ({loopExhaustion.iteration}/{loopExhaustion.maxIterations}) 评审未通过
+                    </strong>
+                    <p className="muted plan-hint">
+                      {pendingIntervention?.summary ?? "循环已达最大迭代次数"}。您可以直接批准以带着当前计划继续，或修改计划后批准，或填写意见驳回重新进入计划循环。
+                    </p>
+                    <div className="plan-exhaustion-comments">
+                      <strong>未解决评审意见 (planComments)</strong>
+                      {planCommentsLoading ? (
+                        <p className="muted">加载评审意见中…</p>
+                      ) : planComments && planComments.length > 0 ? (
+                        <ul>
+                          {planComments.map((c) => (
+                            <li key={c.id}>
+                              <span className={severityClass(c.severity)}>{c.severity}</span>
+                              {c.file && <span className="muted"> {c.file}{c.line != null ? `:${c.line}` : ""}</span>}
+                              {" "}{c.comment}
+                              {c.suggestion && <div className="muted suggestion">建议: {c.suggestion}</div>}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="muted">
+                          {planCommentsSummary ?? "评审未通过，无结构化意见"}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="plan-panel">
                   <div className="plan-toolbar">
                     <strong>{pendingIsLimit ? "审阅当前结果" : "审阅计划 (planDoc)"}</strong>
                     <button
                       className="btn"
                       type="button"
-                      onClick={() => void loadPlanDoc()}
-                      disabled={planLoading}
+                      onClick={() => {
+                        void loadPlanDoc();
+                        if (loopExhaustion) void loadPlanComments();
+                      }}
+                      disabled={planLoading || planCommentsLoading}
                     >
-                      {planLoading ? "加载中…" : "刷新"}
+                      {planLoading || planCommentsLoading ? "加载中…" : "刷新"}
                     </button>
                   </div>
                   {planLoading ? (
