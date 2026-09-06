@@ -11,7 +11,7 @@ import { isSafeArtifactId, readTaskArtifact } from "./task-artifacts.js";
 import { buildPlatformTaskDetail } from "./task-detail.js";
 import { listTaskEvents } from "./task-events.js";
 import type { PlatformConfig } from "./config.js";
-import { PlatformStore } from "./db/store.js";
+import { ARCHIVE_SWEEP_MS, ARCHIVE_TERMINAL_STATUSES, PlatformStore } from "./db/store.js";
 import { purgePlatformTask } from "./delete-task.js";
 import { KernelClient } from "./kernel-client.js";
 import { LocalProcessLauncher } from "./launcher/local.js";
@@ -176,12 +176,16 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
     }
   });
 
-  app.get<{ Querystring: { status?: string; repo?: string } }>("/api/tasks", async (req) => {
-    const repoId = req.query.repo
-      ? store.getRepoByFullName("github", req.query.repo)?.id
-      : undefined;
-    return { tasks: store.listTasks({ status: req.query.status, repoId }) };
-  });
+  app.get<{ Querystring: { status?: string; repo?: string; archived?: string } }>(
+    "/api/tasks",
+    async (req) => {
+      const includeArchived = req.query.archived === "1";
+      const repoId = req.query.repo
+        ? store.getRepoByFullName("github", req.query.repo)?.id
+        : undefined;
+      return { tasks: store.listTasks({ status: req.query.status, repoId, includeArchived }) };
+    },
+  );
 
   app.post<{
     Body: {
@@ -221,6 +225,27 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
     }
     const repo = store.getRepo(task.repo_id);
     return { task, repo: repo ? publicRepo(repo) : null, kernel };
+  });
+
+  const terminalForArchive = new Set<string>(ARCHIVE_TERMINAL_STATUSES);
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/archive", async (req, reply) => {
+    const task = store.getTask(req.params.id);
+    if (!task) return reply.code(404).send({ error: "not found" });
+    if (!terminalForArchive.has(task.status)) {
+      return reply.code(400).send({ error: "only terminal tasks can be archived" });
+    }
+    const next = store.setTaskArchived(req.params.id, true);
+    hub({ type: "task.updated", payload: next });
+    return { task: next };
+  });
+
+  app.post<{ Params: { id: string } }>("/api/tasks/:id/unarchive", async (req, reply) => {
+    const task = store.getTask(req.params.id);
+    if (!task) return reply.code(404).send({ error: "not found" });
+    const next = store.setTaskArchived(req.params.id, false);
+    hub({ type: "task.updated", payload: next });
+    return { task: next };
   });
 
   app.delete<{ Params: { id: string } }>("/api/tasks/:id", async (req, reply) => {
@@ -531,6 +556,14 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
     }
   }
 
+  const sweepArchived = () => {
+    for (const row of store.archiveStaleTerminals()) {
+      hub({ type: "task.updated", payload: row });
+    }
+  };
+  sweepArchived();
+  const sweepTimer = setInterval(sweepArchived, ARCHIVE_SWEEP_MS);
+
   await app.listen({ host: config.listen.host, port: config.listen.port });
   scheduler.start();
 
@@ -540,6 +573,7 @@ export async function startPlatformServer(config: PlatformConfig): Promise<Platf
     scheduler,
     sync,
     async close() {
+      clearInterval(sweepTimer);
       scheduler.stop();
       sync.stopAll();
       await app.close();

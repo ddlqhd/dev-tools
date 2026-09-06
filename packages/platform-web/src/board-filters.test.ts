@@ -1,12 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ATTENTION_COLUMNS,
   EMPTY_FILTERS,
   activeFilterCount,
+  applyFiltersToSearchParams,
+  defaultKeep,
   filtersFromParams,
   filtersToParams,
   laneOfStatus,
+  parseBoardView,
   taskMatchesFilters,
+  taskMatchesKeep,
   type BoardFilters,
 } from "./board-filters.ts";
 import type { Task } from "./api.ts";
@@ -106,4 +111,77 @@ test("activeFilterCount: 按维度计数，而不是按选项个数", () => {
   assert.equal(activeFilterCount(withFilters({ lanes: ["a", "b", "c"] })), 1);
   assert.equal(activeFilterCount(withFilters({ lanes: ["a"], q: "x", time: "today" })), 3);
   assert.equal(activeFilterCount(withFilters({ q: "   " })), 0);
+});
+
+test("ATTENTION_COLUMNS: 等人与失败在前，完成在后", () => {
+  assert.deepEqual(
+    ATTENTION_COLUMNS.map((c) => c.key),
+    ["waiting_human", "failed", "paused", "running", "queued", "done"],
+  );
+});
+
+test("parseBoardView: 只接受三种视图", () => {
+  assert.equal(parseBoardView("focus"), "focus");
+  assert.equal(parseBoardView("kanban"), null);
+});
+
+test("defaultKeep: 看板/注意 7 天，列表全部保留", () => {
+  assert.equal(defaultKeep("board"), "7d");
+  assert.equal(defaultKeep("focus"), "7d");
+  assert.equal(defaultKeep("list"), "all");
+});
+
+test("keep 缺省不写进 URL，显式值才写", () => {
+  assert.equal(filtersToParams(EMPTY_FILTERS, "board").get("keep"), null);
+  assert.equal(filtersToParams(withFilters({ keep: "all" }), "list").get("keep"), null);
+  assert.equal(filtersToParams(withFilters({ keep: "all" }), "board").get("keep"), "all");
+  assert.equal(filtersToParams(withFilters({ keep: "7d" }), "list").get("keep"), "7d");
+});
+
+test("filtersFromParams: 未写 keep 时按视图回落", () => {
+  assert.equal(filtersFromParams(new URLSearchParams(), "board").keep, "7d");
+  assert.equal(filtersFromParams(new URLSearchParams(), "list").keep, "all");
+  assert.equal(filtersFromParams(new URLSearchParams("keep=30d"), "list").keep, "30d");
+});
+
+test("activeFilterCount: 缺省 keep 不计入，显式 keep 计入", () => {
+  assert.equal(activeFilterCount(withFilters({ keep: "7d" }), "board"), 0);
+  assert.equal(activeFilterCount(withFilters({ keep: "all" }), "board"), 1);
+  assert.equal(activeFilterCount(withFilters({ keep: "30d" }), "board"), 1);
+  assert.equal(activeFilterCount(withFilters({ keep: "all" }), "list"), 0);
+  assert.equal(activeFilterCount(withFilters({ keep: "7d" }), "list"), 1);
+});
+
+test("applyFiltersToSearchParams: 保留 view/group/sort/archived", () => {
+  const current = new URLSearchParams("view=list&group=repo&sort=title&archived=1&q=旧");
+  const next = applyFiltersToSearchParams(current, withFilters({ q: "新" }), "list");
+  assert.equal(next.get("view"), "list");
+  assert.equal(next.get("group"), "repo");
+  assert.equal(next.get("sort"), "title");
+  assert.equal(next.get("archived"), "1");
+  assert.equal(next.get("q"), "新");
+});
+
+test("taskMatchesKeep: 热态永远留下，终态按 updated_at 衰减", () => {
+  const now = Date.parse("2026-09-06T12:00:00.000Z");
+  const running = makeTask({ status: "running", updated_at: "2026-01-01T00:00:00.000Z" });
+  const recentDone = makeTask({
+    status: "done",
+    updated_at: "2026-09-05T12:00:00.000Z",
+  });
+  const oldDone = makeTask({
+    status: "done",
+    updated_at: "2026-08-01T12:00:00.000Z",
+  });
+  const oldFailed = makeTask({
+    status: "failed",
+    updated_at: "2026-08-20T12:00:00.000Z",
+  });
+
+  assert.equal(taskMatchesKeep(running, "7d", now), true);
+  assert.equal(taskMatchesKeep(recentDone, "7d", now), true);
+  assert.equal(taskMatchesKeep(oldDone, "7d", now), false);
+  assert.equal(taskMatchesKeep(oldFailed, "7d", now), false);
+  assert.equal(taskMatchesKeep(oldDone, "all", now), true);
+  assert.equal(taskMatchesKeep(oldFailed, "30d", now), true);
 });

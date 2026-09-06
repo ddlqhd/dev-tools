@@ -85,6 +85,7 @@ export interface Task {
   pipeline_name: string | null;
   error: string | null;
   parent_task_id?: string | null;
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -177,7 +178,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(config),
     }),
-  listTasks: () => req<{ tasks: Task[] }>("/api/tasks"),
+  listTasks: (opts?: { archived?: boolean }) =>
+    req<{ tasks: Task[] }>(opts?.archived ? "/api/tasks?archived=1" : "/api/tasks"),
   createTask: (body: {
     repoId: string;
     title: string;
@@ -206,6 +208,9 @@ export const api = {
   abort: (id: string) => req(`/api/tasks/${id}/abort`, { method: "POST", body: "{}" }),
   cancel: (id: string) => req(`/api/tasks/${id}/cancel`, { method: "POST", body: "{}" }),
   deleteTask: (id: string) => req(`/api/tasks/${id}`, { method: "DELETE" }),
+  archive: (id: string) => req<{ task: Task }>(`/api/tasks/${id}/archive`, { method: "POST", body: "{}" }),
+  unarchive: (id: string) =>
+    req<{ task: Task }>(`/api/tasks/${id}/unarchive`, { method: "POST", body: "{}" }),
   retry: (id: string) => req(`/api/tasks/${id}/retry`, { method: "POST", body: "{}" }),
   inject: (id: string, text: string) =>
     req(`/api/tasks/${id}/instructions`, {

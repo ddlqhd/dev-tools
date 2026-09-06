@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useLocation } from "react-router-dom";
 import { api, connectHub, useHubSync, type HubStatus, type Repo, type Task } from "./api";
 import { mergeTaskSnapshot, upsertTask } from "./merge-tasks";
 
@@ -22,6 +23,7 @@ type TaskStore = {
   error: string | null;
   hubStatus: HubStatus;
   waitingHumanCount: number;
+  includeArchived: boolean;
   reload: () => Promise<void>;
   /** Local echo so the board updates before the hub round-trip lands. */
   applyTask: (task: Task) => void;
@@ -36,19 +38,33 @@ export function useTaskStore(): TaskStore {
   return store;
 }
 
+function includeArchivedFromLocation(pathname: string, search: string): boolean {
+  return pathname === "/" && new URLSearchParams(search).get("archived") === "1";
+}
+
 export function TaskStoreProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const includeArchived = includeArchivedFromLocation(location.pathname, location.search);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const includeArchivedRef = useRef(includeArchived);
+  includeArchivedRef.current = includeArchived;
   const { status: hubStatus, generation } = useHubSync();
   const notified = useRef(new Set<string>());
 
   const reload = useCallback(async () => {
     const fetchedAt = new Date().toISOString();
     try {
-      const [t, r] = await Promise.all([api.listTasks(), api.listRepos()]);
-      setTasks((prev) => mergeTaskSnapshot(prev, t.tasks, fetchedAt));
+      const [t, r] = await Promise.all([
+        api.listTasks({ archived: includeArchived }),
+        api.listRepos(),
+      ]);
+      setTasks((prev) => {
+        const merged = mergeTaskSnapshot(prev, t.tasks, fetchedAt);
+        return includeArchived ? merged : merged.filter((task) => !task.archived_at);
+      });
       setRepos(r.repos);
       setError(null);
     } catch (e) {
@@ -57,7 +73,7 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [includeArchived]);
 
   const applyTask = useCallback((task: Task) => {
     setTasks((prev) => upsertTask(prev, task));
@@ -71,7 +87,8 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
     const off = connectHub((msg) => {
       if (msg.type === "task.updated" && msg.payload) {
         const task = msg.payload as Task;
-        applyTask(task);
+        if (task.archived_at && !includeArchivedRef.current) removeTask(task.id);
+        else applyTask(task);
         if (task.status === "waiting_human") notifyWaitingHuman(task, notified.current);
         else notified.current.delete(task.id);
       }
@@ -110,11 +127,23 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
       error,
       hubStatus,
       waitingHumanCount,
+      includeArchived,
       reload,
       applyTask,
       removeTask,
     }),
-    [tasks, repos, loaded, error, hubStatus, waitingHumanCount, reload, applyTask, removeTask],
+    [
+      tasks,
+      repos,
+      loaded,
+      error,
+      hubStatus,
+      waitingHumanCount,
+      includeArchived,
+      reload,
+      applyTask,
+      removeTask,
+    ],
   );
 
   return <TaskStoreContext.Provider value={value}>{children}</TaskStoreContext.Provider>;

@@ -1,8 +1,11 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import {
   COLUMNS,
+  KEEP_PRESETS,
   activeFilterCount,
+  defaultKeep,
   type BoardFilters,
+  type BoardView,
 } from "../board-filters";
 import type { TimeFilterMode } from "../task-time-filter";
 
@@ -86,6 +89,43 @@ function Chip({
   );
 }
 
+export function ChoiceChip({
+  label,
+  value,
+  options,
+  onChange,
+  active = false,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  active?: boolean;
+}) {
+  const current = options.find((o) => o.value === value)?.label ?? value;
+  return (
+    <details className={`chip${active ? " chip--active" : ""}`}>
+      <summary>
+        <span className="chip-label">{label}</span>
+        <span className="chip-value">{current}</span>
+        <ChevronIcon />
+      </summary>
+      <div className="chip-menu">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`chip-option chip-option--button${value === opt.value ? " is-selected" : ""}`}
+            onClick={() => onChange(opt.value)}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function ChevronIcon() {
   return (
     <svg className="chip-caret" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
@@ -106,6 +146,9 @@ export function FilterBar({
   laneCounts,
   searchRef,
   trailing,
+  view,
+  includeArchived,
+  onToggleArchived,
 }: {
   filters: BoardFilters;
   onChange: (patch: Partial<BoardFilters>) => void;
@@ -115,11 +158,16 @@ export function FilterBar({
   laneCounts: Record<string, number>;
   searchRef?: React.RefObject<HTMLInputElement | null>;
   trailing?: ReactNode;
+  view: BoardView;
+  includeArchived: boolean;
+  onToggleArchived: () => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   useCloseOnOutside(root);
 
-  const active = activeFilterCount(filters);
+  const active = activeFilterCount(filters, view) + (includeArchived ? 1 : 0);
+  const keepDefault = defaultKeep(view);
+  const keepLabel = KEEP_PRESETS.find((p) => p.mode === filters.keep)?.label ?? "近 7 天";
   const timeLabel =
     filters.time === "custom"
       ? `${filters.from || "…"} → ${filters.to || "…"}`
@@ -127,98 +175,131 @@ export function FilterBar({
 
   return (
     <div className="filterbar" ref={root}>
-      <div className="filter-search">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <circle cx="7" cy="7" r="4.75" stroke="currentColor" strokeWidth="1.4" />
-          <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
-        <input
-          ref={searchRef}
-          value={filters.q}
-          onChange={(e) => onChange({ q: e.target.value })}
-          placeholder="按标题、仓库、分支过滤"
-          aria-label="过滤任务"
-          spellCheck={false}
+      <div className="filterbar-main">
+        <div className="filter-search">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.75" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          <input
+            ref={searchRef}
+            value={filters.q}
+            onChange={(e) => onChange({ q: e.target.value })}
+            placeholder="按标题、仓库、分支过滤"
+            aria-label="过滤任务"
+            spellCheck={false}
+          />
+          {filters.q && (
+            <button
+              type="button"
+              className="filter-search-clear"
+              aria-label="清除搜索"
+              onClick={() => onChange({ q: "" })}
+            >
+              ×
+            </button>
+          )}
+        </div>
+
+        <Chip
+          label="状态"
+          selected={filters.lanes}
+          options={COLUMNS.map((c) => ({ value: c.key, label: c.title, count: laneCounts[c.key] ?? 0 }))}
+          onChange={(lanes) => onChange({ lanes })}
         />
-        {filters.q && (
-          <button
-            type="button"
-            className="filter-search-clear"
-            aria-label="清除搜索"
-            onClick={() => onChange({ q: "" })}
-          >
-            ×
+        <Chip
+          label="仓库"
+          selected={filters.repos}
+          options={repoOptions}
+          onChange={(repos) => onChange({ repos })}
+          emptyHint="还没有接入仓库"
+        />
+        <Chip
+          label="Pipeline"
+          selected={filters.pipelines}
+          options={pipelineOptions}
+          onChange={(pipelines) => onChange({ pipelines })}
+          emptyHint="任务尚未记录 pipeline"
+        />
+
+        <details className={`chip${filters.time !== "all" ? " chip--active" : ""}`}>
+          <summary>
+            <span className="chip-label">时间</span>
+            {filters.time !== "all" && <span className="chip-value">{timeLabel}</span>}
+            <ChevronIcon />
+          </summary>
+          <div className="chip-menu">
+            {TIME_PRESETS.map((preset) => (
+              <button
+                key={preset.mode}
+                type="button"
+                className={`chip-option chip-option--button${
+                  filters.time === preset.mode ? " is-selected" : ""
+                }`}
+                onClick={() => onChange({ time: preset.mode, from: "", to: "" })}
+              >
+                {preset.label}
+              </button>
+            ))}
+            <div className="chip-range">
+              <label>
+                <span>从</span>
+                <input
+                  type="date"
+                  value={filters.from}
+                  onChange={(e) => onChange({ from: e.target.value, time: "custom" })}
+                />
+              </label>
+              <label>
+                <span>到</span>
+                <input
+                  type="date"
+                  value={filters.to}
+                  onChange={(e) => onChange({ to: e.target.value, time: "custom" })}
+                />
+              </label>
+            </div>
+          </div>
+        </details>
+
+        <details className={`chip${filters.keep !== keepDefault ? " chip--active" : ""}`}>
+          <summary>
+            <span className="chip-label">完成</span>
+            <span className="chip-value">{keepLabel}</span>
+            <ChevronIcon />
+          </summary>
+          <div className="chip-menu">
+            {KEEP_PRESETS.map((preset) => (
+              <button
+                key={preset.mode}
+                type="button"
+                className={`chip-option chip-option--button${
+                  filters.keep === preset.mode ? " is-selected" : ""
+                }`}
+                onClick={() => onChange({ keep: preset.mode })}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </details>
+
+        <button
+          type="button"
+          className={`chip-toggle${includeArchived ? " chip--active" : ""}`}
+          aria-pressed={includeArchived}
+          onClick={onToggleArchived}
+        >
+          含归档
+        </button>
+
+        {active > 0 && (
+          <button type="button" className="filter-reset" onClick={onReset}>
+            清除筛选
+            <span className="Counter">{active}</span>
           </button>
         )}
       </div>
-
-      <Chip
-        label="状态"
-        selected={filters.lanes}
-        options={COLUMNS.map((c) => ({ value: c.key, label: c.title, count: laneCounts[c.key] ?? 0 }))}
-        onChange={(lanes) => onChange({ lanes })}
-      />
-      <Chip
-        label="仓库"
-        selected={filters.repos}
-        options={repoOptions}
-        onChange={(repos) => onChange({ repos })}
-        emptyHint="还没有接入仓库"
-      />
-      <Chip
-        label="Pipeline"
-        selected={filters.pipelines}
-        options={pipelineOptions}
-        onChange={(pipelines) => onChange({ pipelines })}
-        emptyHint="任务尚未记录 pipeline"
-      />
-
-      <details className={`chip${filters.time !== "all" ? " chip--active" : ""}`}>
-        <summary>
-          <span className="chip-label">时间</span>
-          {filters.time !== "all" && <span className="chip-value">{timeLabel}</span>}
-          <ChevronIcon />
-        </summary>
-        <div className="chip-menu">
-          {TIME_PRESETS.map((preset) => (
-            <button
-              key={preset.mode}
-              type="button"
-              className={`chip-option chip-option--button${
-                filters.time === preset.mode ? " is-selected" : ""
-              }`}
-              onClick={() => onChange({ time: preset.mode, from: "", to: "" })}
-            >
-              {preset.label}
-            </button>
-          ))}
-          <div className="chip-range">
-            <label>
-              <span>从</span>
-              <input
-                type="date"
-                value={filters.from}
-                onChange={(e) => onChange({ from: e.target.value, time: "custom" })}
-              />
-            </label>
-            <label>
-              <span>到</span>
-              <input
-                type="date"
-                value={filters.to}
-                onChange={(e) => onChange({ to: e.target.value, time: "custom" })}
-              />
-            </label>
-          </div>
-        </div>
-      </details>
-
-      {active > 0 && (
-        <button type="button" className="filter-reset" onClick={onReset}>
-          清除筛选
-          <span className="Counter">{active}</span>
-        </button>
-      )}
 
       {trailing && <div className="filterbar-trailing">{trailing}</div>}
     </div>

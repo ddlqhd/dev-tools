@@ -171,6 +171,20 @@ code {
   padding: 24px 20px 48px;
 }
 
+.content-pane:has(> .container--board) {
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.container--board {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--space-3);
+}
+
 /* Shared page chrome */
 .page-stack {
   display: flex;
@@ -1075,7 +1089,7 @@ label.settings-repo-pick {
 .workflow-node:focus-visible,
 .stage-head:focus-visible,
 .board-card-main:focus-visible,
-.board-card-menu > summary:focus-visible {
+.board-card-menu-trigger:focus-visible {
   z-index: 2;
   outline: 2px solid var(--accent-fg);
   outline-offset: 2px;
@@ -1581,6 +1595,10 @@ label {
 /* Board heading, filters + create-task modal */
 .board-page {
   min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .board-heading {
@@ -1589,6 +1607,7 @@ label {
   justify-content: space-between;
   gap: 24px;
   margin-bottom: 16px;
+  flex-shrink: 0;
 }
 
 .board-heading h1 {
@@ -1605,7 +1624,46 @@ label {
   font-size: var(--text-small);
 }
 
+.board-keep-reveal {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.board-keep-reveal:hover {
+  text-decoration: underline;
+}
+
+.board-list-hint {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  color: var(--fg-muted);
+  font-size: var(--text-tiny);
+}
+
+.board-list-hint button {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.board-list-hint-dismiss {
+  color: var(--fg-muted) !important;
+}
+
 .board-error {
+  flex-shrink: 0;
   margin: 0 0 16px;
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--danger-fg) 35%, transparent);
@@ -1660,19 +1718,31 @@ label {
    an always-on row beats Linear's "+ Filter" drill-down. */
 .filterbar {
   display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  flex-shrink: 0;
+}
+
+.filterbar-main {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-3);
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .filter-search {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex: 0 1 280px;
-  min-width: 180px;
-  padding: 4px var(--space-2);
+  flex: 1 1 140px;
+  min-width: 128px;
+  max-width: 220px;
+  height: 30px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--control-bg);
@@ -1697,6 +1767,7 @@ label {
   color: var(--fg-default);
   font: inherit;
   font-size: var(--text-small);
+  line-height: 20px;
   outline: none;
 }
 
@@ -1716,14 +1787,17 @@ label {
 
 .chip {
   position: relative;
+  display: flex;
+  align-items: center;
 }
 
 .chip > summary {
   display: inline-flex;
   align-items: center;
+  height: 30px;
   gap: var(--space-1);
   list-style: none;
-  padding: 4px var(--space-2);
+  padding: 0 var(--space-2);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--btn-bg);
@@ -1767,6 +1841,34 @@ label {
 .chip-caret {
   flex-shrink: 0;
   opacity: 0.7;
+}
+
+.chip-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--btn-bg);
+  color: var(--fg-default);
+  font: inherit;
+  font-size: var(--text-small);
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip-toggle:hover {
+  background: var(--btn-hover-bg);
+}
+
+.chip-toggle.chip--active {
+  border-color: color-mix(in srgb, var(--accent-fg) 55%, var(--border-default));
+  background: color-mix(in srgb, var(--accent-fg) 12%, transparent);
+  color: var(--accent-fg);
+  font-weight: 600;
 }
 
 .chip-menu {
@@ -1909,13 +2011,15 @@ label {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 4px var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-md);
   background: none;
   color: var(--fg-muted);
   font: inherit;
   font-size: var(--text-small);
+  line-height: 20px;
   cursor: pointer;
 }
 
@@ -1925,38 +2029,60 @@ label {
 }
 
 .filterbar-trailing {
-  margin-left: auto;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
 
+.filterbar-trailing .chip-menu {
+  left: auto;
+  right: 0;
+}
+
 .board-viewport {
+  flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow-x: auto;
-  padding-bottom: var(--space-2);
+  overflow-y: hidden;
 }
 
 /*
- * A wrapping kanban stops being a kanban: always one row. Columns share the width
- * when they fit and the viewport scrolls when they don't. `--board-columns` is set
- * inline so hiding lanes via the status filter re-spreads the rest.
+ * One row of columns that share leftover width. Collapsed cold lanes take a
+ * fixed rail; the rest grow. The board itself is viewport-tall so each column
+ * scrolls internally instead of stretching the page.
  */
 .board {
-  display: grid;
-  grid-template-columns: repeat(var(--board-columns, 6), minmax(184px, 1fr));
+  display: flex;
   gap: var(--space-3);
-  align-items: start;
+  align-items: stretch;
+  height: 100%;
   min-width: 100%;
 }
 
 .board-column {
   --column-accent: var(--fg-muted);
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 184px;
+  min-height: 0;
   background: var(--canvas-subtle);
   border: 1px solid var(--border-muted);
   border-radius: var(--radius-lg);
-  min-height: 96px;
-  overflow: visible;
+  overflow: hidden;
+}
+
+.board-column.is-focused {
+  border-color: color-mix(in srgb, var(--accent-fg) 55%, var(--border-default));
+}
+
+.board-column--collapsed {
+  flex: 0 0 40px;
+  min-width: 40px;
+  width: 40px;
+  cursor: pointer;
 }
 
 .board-column--running {
@@ -1982,6 +2108,25 @@ label {
   justify-content: space-between;
   gap: 8px;
   padding: 9px 12px 10px;
+  flex-shrink: 0;
+}
+
+.board-column--collapsed .board-column-header {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  height: 100%;
+  padding: 10px 4px;
+  gap: 10px;
+}
+
+.board-column--collapsed .board-column-header > div {
+  flex-direction: column;
+}
+
+.board-column--collapsed .board-column-header h2 {
+  writing-mode: vertical-rl;
+  letter-spacing: 0.12em;
 }
 
 .board-column-header > div {
@@ -2008,7 +2153,36 @@ label {
 }
 
 .board-column-body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0 var(--space-2) var(--space-2);
+}
+
+.board-column-more {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 2px;
+  padding: 6px 8px;
+  border: 1px dashed var(--border-muted);
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--accent-fg);
+  font: inherit;
+  font-size: var(--text-tiny);
+  cursor: pointer;
+}
+
+.board-column-more span {
+  color: var(--fg-muted);
+}
+
+.board-column-more:hover {
+  background: var(--control-transparent-hover);
 }
 
 .board-column-empty {
@@ -2048,8 +2222,39 @@ label {
   text-decoration: none;
 }
 
-.board-card:has(> .board-card-menu[open]) {
-  z-index: 5;
+.board-card.is-active {
+  border-color: var(--accent-fg);
+  box-shadow: inset 2px 0 0 var(--accent-fg);
+}
+
+.board-card--compact {
+  padding: 8px 8px 8px 10px;
+  margin-bottom: 6px;
+}
+
+.board-card--compact .title {
+  margin-bottom: 0;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.board-card--compact .board-card-context {
+  margin-bottom: 0;
+}
+
+.board-card--compact .board-card-context time {
+  color: var(--fg-muted);
+  font-size: var(--text-tiny);
+}
+
+.board-card-error-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--danger-fg);
 }
 
 .board-card-main {
@@ -2068,8 +2273,8 @@ label {
   flex-shrink: 0;
 }
 
-.board-card-menu > summary {
-  list-style: none;
+.board-card-menu-trigger {
+  appearance: none;
   cursor: pointer;
   user-select: none;
   width: 28px;
@@ -2077,26 +2282,22 @@ label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: 0;
   border-radius: var(--radius-md);
+  background: none;
   color: var(--fg-muted);
   font-size: var(--text-lg);
   line-height: 1;
 }
 
-.board-card-menu > summary::-webkit-details-marker {
-  display: none;
-}
-
-.board-card-menu > summary:hover {
+.board-card-menu-trigger:hover {
   background: var(--btn-hover-bg);
   color: var(--fg-default);
 }
 
 .board-card-menu-panel {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 20;
+  position: fixed;
+  z-index: 40;
   min-width: 96px;
   padding: 4px;
   margin-top: 2px;
@@ -2209,6 +2410,15 @@ label {
 }
 
 @media (max-width: 760px) {
+  .filterbar {
+    flex-wrap: wrap;
+  }
+
+  .filterbar-trailing {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
   .container--board {
     padding-top: 18px;
   }
@@ -2268,8 +2478,17 @@ label {
     padding-bottom: 7px;
   }
 
-  .board {
-    grid-template-columns: 1fr;
+  .board-viewport {
+    scroll-snap-type: x proximity;
+  }
+
+  .board-column:not(.board-column--collapsed) {
+    flex: 0 0 240px;
+    min-width: 240px;
+  }
+
+  .board-column {
+    scroll-snap-align: start;
   }
 }
 
@@ -3281,6 +3500,8 @@ pre.artifact {
 /* View controls */
 .view-toggle {
   display: inline-flex;
+  align-items: center;
+  height: 30px;
   padding: 2px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
@@ -3289,14 +3510,17 @@ pre.artifact {
 
 .view-toggle button {
   appearance: none;
-  padding: 2px var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-sm);
   background: none;
   color: var(--fg-muted);
   font: inherit;
-  font-size: var(--text-tiny);
-  line-height: 18px;
+  font-size: var(--text-small);
+  line-height: 20px;
   cursor: pointer;
 }
 
@@ -3327,6 +3551,16 @@ pre.artifact {
 
 /* Dense list view: one row per task, metadata right-aligned so the eye
    only tracks two vertical edges while scanning. */
+.board-page--list .task-list,
+.board-page--list .task-list-empty {
+  flex: 1;
+  min-height: 0;
+}
+
+.board-page--list .task-list {
+  overflow-y: auto;
+}
+
 .task-list {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -3365,6 +3599,29 @@ pre.artifact {
   font-size: var(--text-tiny);
   font-weight: 600;
   color: var(--fg-muted);
+}
+
+.task-list-group-head.is-collapsible {
+  cursor: pointer;
+}
+
+.task-list-group-head.is-collapsible:hover {
+  background: var(--control-transparent-hover);
+}
+
+.task-list-group-head.is-active {
+  box-shadow: inset 2px 0 0 var(--accent-fg);
+}
+
+.task-list-group-caret {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+
+.task-list-more {
+  color: var(--fg-muted);
+  font-size: var(--text-tiny);
 }
 
 .task-row {
@@ -3442,6 +3699,22 @@ pre.artifact {
   font-size: var(--text-tiny);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+.task-row-archive {
+  appearance: none;
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-tiny);
+  cursor: pointer;
+}
+
+.task-row-archive:hover {
+  color: var(--accent-fg);
 }
 
 @media (max-width: 860px) {

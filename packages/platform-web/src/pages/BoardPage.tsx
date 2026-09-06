@@ -1,34 +1,64 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { boardActionContext, taskActionsEnabled } from "@devtools/shared";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type Task } from "../api";
 import { errorText, useToast } from "../components/Toast";
-import { FilterBar, type FilterOption } from "../components/FilterBar";
-import { TaskListView, type ListGrouping, type ListSort } from "../components/TaskListView";
+import { ChoiceChip, FilterBar, type FilterOption } from "../components/FilterBar";
+import { BoardCard } from "../components/BoardCard";
+import {
+  FOCUS_DEFAULT_COLLAPSED,
+  LIST_DEFAULT_COLLAPSED,
+  TaskListView,
+  type ListGrouping,
+  type ListSort,
+} from "../components/TaskListView";
 import { useTaskStore } from "../task-store";
 import { useUi } from "../ui-store";
-import { formatCombo, useKeyBindings } from "../shortcuts";
-import { StatusIcon } from "../components/StatusIcon";
+import { formatCombo, isTypingTarget, useKeyBindings } from "../shortcuts";
 import {
+  ATTENTION_COLUMNS,
   COLUMNS,
   EMPTY_FILTERS,
   TERMINAL_STATUSES,
   activeFilterCount,
+  applyFiltersToSearchParams,
+  defaultKeep,
   filtersFromParams,
-  filtersToParams,
-  laneOfStatus,
+  isColdLane,
+  parseBoardView,
   rangeOf,
   taskMatchesFilters,
+  taskMatchesKeep,
   type BoardFilters,
+  type BoardView,
 } from "../board-filters";
+import {
+  PAGE_SIZES,
+  coldLaneCollapsed,
+  columnVisibleCount,
+  readDensityPrefs,
+  readLanePrefs,
+  resolveCompact,
+  writeDensityPrefs,
+  writeLanePrefs,
+  type DensityPrefs,
+  type LanePrefs,
+} from "../board-lanes";
 
-const MENU_ACTIONS = [
-  { key: "pause" as const, label: "暂停", run: (id: string) => api.pause(id) },
-  { key: "resume" as const, label: "继续", run: (id: string) => api.resume(id) },
-  { key: "abort" as const, label: "中止", run: (id: string) => api.abort(id) },
-  { key: "cancel" as const, label: "取消", run: (id: string) => api.cancel(id) },
-  { key: "retry" as const, label: "重试", run: (id: string) => api.retry(id) },
-];
+const NARROW_QUERY = "(max-width: 760px)";
+const LIST_HINT_KEY = "codeloop.board.listHintDismissed";
+
+function useNarrowScreen(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(NARROW_QUERY).matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW_QUERY);
+    const onChange = () => setNarrow(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return narrow;
+}
 
 /** Count all descendants of `rootId` in the board task list (ci-fix chains, etc.). */
 function countDescendantTasks(tasks: Task[], rootId: string): number {
@@ -52,16 +82,27 @@ function countDescendantTasks(tasks: Task[], rootId: string): number {
 }
 
 export function BoardPage() {
-  const { tasks, repos, loaded, error: loadError, applyTask, removeTask } = useTaskStore();
+  const {
+    tasks,
+    repos,
+    loaded,
+    error: loadError,
+    applyTask,
+    removeTask,
+    includeArchived,
+  } = useTaskStore();
   const toast = useToast();
+  const navigate = useNavigate();
   const [pipelines, setPipelines] = useState<string[]>([]);
   const [pipelinesLoading, setPipelinesLoading] = useState(false);
   /** Scoped to the create dialog: form errors belong next to the form, not in a toast. */
   const [formError, setFormError] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const searchRef = useRef<HTMLInputElement>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
   const ui = useUi();
   const createOpen = ui.createOpen;
+  const narrow = useNarrowScreen();
   const [pendingDelete, setPendingDelete] = useState<{
     id: string;
     title: string;
@@ -73,6 +114,13 @@ export function BoardPage() {
     requirement: "",
     pipeline: "",
   });
+  const [lanePrefs, setLanePrefs] = useState<LanePrefs>(readLanePrefs);
+  const [density, setDensity] = useState<DensityPrefs>(readDensityPrefs);
+  const [revealed, setRevealed] = useState<Record<string, number>>({});
+  const [focus, setFocus] = useState<{ lane: string; taskId: string | null } | null>(null);
+  const [hintDismissed, setHintDismissed] = useState(
+    () => typeof sessionStorage !== "undefined" && sessionStorage.getItem(LIST_HINT_KEY) === "1",
+  );
 
   const closeCreate = () => {
     ui.closeCreate();
@@ -82,6 +130,76 @@ export function BoardPage() {
   const closeDelete = () => {
     setPendingDelete(null);
   };
+
+  const viewParam = searchParams.get("view");
+  const view: BoardView = parseBoardView(viewParam) ?? (narrow ? "list" : "board");
+
+  const grouping = (searchParams.get("group") as ListGrouping) || "lane";
+  const sort = (searchParams.get("sort") as ListSort) || "updated";
+
+  const filters = useMemo(() => filtersFromParams(searchParams, view), [searchParams, view]);
+
+  const patchFilters = useCallback(
+    (patch: Partial<BoardFilters>) => {
+      setSearchParams(applyFiltersToSearchParams(searchParams, { ...filters, ...patch }, view), {
+        replace: true,
+      });
+    },
+    [filters, searchParams, setSearchParams, view],
+  );
+
+  const resetFilters = useCallback(() => {
+    const next = applyFiltersToSearchParams(
+      searchParams,
+      { ...EMPTY_FILTERS, keep: defaultKeep(view) },
+      view,
+    );
+    next.delete("archived");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, view]);
+
+  const toggleArchived = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    if (searchParams.get("archived") === "1") next.delete("archived");
+    else next.set("archived", "1");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const setView = useCallback(
+    (next: BoardView) => {
+      const params = new URLSearchParams(searchParams);
+      params.set("view", next);
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const setViewParam = useCallback(
+    (key: string, value: string, fallback: string) => {
+      const next = new URLSearchParams(searchParams);
+      if (value === fallback) next.delete(key);
+      else next.set(key, value);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const persistLanePrefs = useCallback((next: LanePrefs) => {
+    setLanePrefs(next);
+    writeLanePrefs(next);
+  }, []);
+
+  const prevKeep = useRef(filters.keep);
+  useEffect(() => {
+    if (prevKeep.current !== "all" && filters.keep === "all") {
+      setLanePrefs((prev) => {
+        const next = { ...prev, done: "expanded" as const, failed: "expanded" as const };
+        writeLanePrefs(next);
+        return next;
+      });
+    }
+    prevKeep.current = filters.keep;
+  }, [filters.keep]);
 
   useEffect(() => {
     if (form.repoId || !repos[0]) return;
@@ -146,45 +264,24 @@ export function BoardPage() {
     };
   }, [createOpen, pendingDelete]);
 
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      const menus = document.querySelectorAll<HTMLDetailsElement>("details.board-card-menu[open]");
-      for (const menu of menus) {
-        if (!(event.target instanceof Node) || !menu.contains(event.target)) {
-          menu.open = false;
-        }
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-    };
-  }, []);
-
   const repoName = useMemo(() => {
     const m = new Map(repos.map((r) => [r.id, r.full_name]));
     return (id: string) => m.get(id) ?? id;
   }, [repos]);
 
-  const filters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
-
-  const patchFilters = useCallback(
-    (patch: Partial<BoardFilters>) => {
-      setSearchParams(filtersToParams({ ...filters, ...patch }), { replace: true });
-    },
-    [filters, setSearchParams],
-  );
-
-  const resetFilters = useCallback(() => {
-    setSearchParams(filtersToParams(EMPTY_FILTERS), { replace: true });
-  }, [setSearchParams]);
-
   const timeRange = useMemo(() => rangeOf(filters), [filters]);
 
-  const filteredTasks = useMemo(
+  const matchedTasks = useMemo(
     () => tasks.filter((t) => taskMatchesFilters(t, filters, { repoName, range: timeRange })),
     [tasks, filters, repoName, timeRange],
   );
+
+  const filteredTasks = useMemo(
+    () => matchedTasks.filter((t) => taskMatchesKeep(t, filters.keep)),
+    [matchedTasks, filters.keep],
+  );
+
+  const hiddenKeepCount = matchedTasks.length - filteredTasks.length;
 
   const openTaskCount = useMemo(
     () => filteredTasks.filter((task) => !TERMINAL_STATUSES.includes(task.status)).length,
@@ -192,14 +289,15 @@ export function BoardPage() {
   );
 
   // Lane counts ignore the lane filter itself, so the menu still shows what you'd get
-  // by ticking another box.
+  // by ticking another box. Keep is applied so the numbers match the board.
   const laneCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const task of tasks) {
       if (!taskMatchesFilters(task, { ...filters, lanes: [] }, { repoName, range: timeRange })) {
         continue;
       }
-      const lane = laneOfStatus(task.status);
+      if (!taskMatchesKeep(task, filters.keep)) continue;
+      const lane = COLUMNS.find((c) => c.match.includes(task.status))?.key;
       if (lane) counts[lane] = (counts[lane] ?? 0) + 1;
     }
     return counts;
@@ -224,33 +322,55 @@ export function BoardPage() {
       .map(([name, count]) => ({ value: name, label: name, count }));
   }, [tasks]);
 
-  const visibleColumns = useMemo(
-    () => (filters.lanes.length ? COLUMNS.filter((c) => filters.lanes.includes(c.key)) : COLUMNS),
-    [filters.lanes],
-  );
+  const compactCards = resolveCompact(density, filteredTasks.length);
 
-  const activeFilters = activeFilterCount(filters);
+  const columns = useMemo(() => {
+    const source = filters.lanes.length
+      ? COLUMNS.filter((c) => filters.lanes.includes(c.key))
+      : COLUMNS;
+    return source
+      .map((col) => {
+        const items = filteredTasks.filter((t) => col.match.includes(t.status));
+        const visible = columnVisibleCount(items.length, revealed[col.key] ?? 0, density.pageSize);
+        return { ...col, items, visibleItems: items.slice(0, visible) };
+      })
+      .filter((col) => col.items.length > 0 || !isColdLane(col.key));
+  }, [filters.lanes, filteredTasks, revealed, density.pageSize]);
 
-  // View preferences live in the URL too, so a shared link reproduces exactly what
-  // the sender was looking at.
-  const view = searchParams.get("view") === "list" ? "list" : "board";
-  const grouping = (searchParams.get("group") as ListGrouping) || "lane";
-  const sort = (searchParams.get("sort") as ListSort) || "updated";
+  const collapsedLanes = useMemo(() => {
+    const set = new Set<string>();
+    for (const col of columns) {
+      if (coldLaneCollapsed(col.key, col.items.length, lanePrefs, filters.lanes)) {
+        set.add(col.key);
+      }
+    }
+    return set;
+  }, [columns, lanePrefs, filters.lanes]);
 
-  const setViewParam = useCallback(
-    (key: string, value: string, fallback: string) => {
-      const next = new URLSearchParams(searchParams);
-      if (value === fallback) next.delete(key);
-      else next.set(key, value);
-      setSearchParams(next, { replace: true });
+  const toggleLane = useCallback(
+    (key: string) => {
+      if (!isColdLane(key)) return;
+      const nextFold = collapsedLanes.has(key) ? "expanded" : "collapsed";
+      persistLanePrefs({ ...lanePrefs, [key]: nextFold });
     },
-    [searchParams, setSearchParams],
+    [collapsedLanes, lanePrefs, persistLanePrefs],
   );
+
+  const activeFilters = activeFilterCount(filters, view) + (includeArchived ? 1 : 0);
+  const showListHint =
+    view === "board" && matchedTasks.length >= 40 && openTaskCount < 8 && !hintDismissed;
 
   const pipelineOptions =
     form.pipeline && !pipelines.includes(form.pipeline) ? [form.pipeline, ...pipelines] : pipelines;
 
   const canSubmit = !!form.repoId && !!form.requirement && !!form.pipeline && !pipelinesLoading;
+
+  const countLabel =
+    hiddenKeepCount > 0
+      ? `${filteredTasks.length} / ${matchedTasks.length} 个任务`
+      : activeFilters > 0
+        ? `${filteredTasks.length} / ${tasks.length} 个任务`
+        : `${filteredTasks.length} 个任务`;
 
   useKeyBindings([
     {
@@ -260,10 +380,106 @@ export function BoardPage() {
     },
     {
       combo: "v",
-      run: () => setViewParam("view", view === "list" ? "board" : "list", "board"),
+      run: () => {
+        const order: BoardView[] = ["board", "list", "focus"];
+        const at = order.indexOf(view);
+        setView(order[(at + 1) % order.length]!);
+      },
       enabled: !ui.anyOverlayOpen && !pendingDelete,
     },
   ]);
+
+  useEffect(() => {
+    if (view !== "board" || ui.anyOverlayOpen || pendingDelete) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
+      const keys = ["j", "k", "[", "]", "c", "Enter"];
+      if (!keys.includes(e.key)) return;
+
+      const laneKeys = columns.map((c) => c.key);
+      if (laneKeys.length === 0) return;
+
+      const currentLane = focus && laneKeys.includes(focus.lane) ? focus.lane : laneKeys[0]!;
+      const col = columns.find((c) => c.key === currentLane);
+      const items = collapsedLanes.has(currentLane) ? [] : (col?.visibleItems ?? []);
+      const at = focus?.taskId ? items.findIndex((t) => t.id === focus.taskId) : -1;
+
+      if (e.key === "[" || e.key === "]") {
+        e.preventDefault();
+        const idx = laneKeys.indexOf(currentLane);
+        const step = e.key === "]" ? 1 : -1;
+        const next = laneKeys[(idx + step + laneKeys.length) % laneKeys.length]!;
+        setFocus({ lane: next, taskId: null });
+        return;
+      }
+
+      if (e.key === "j" || e.key === "k") {
+        e.preventDefault();
+        if (collapsedLanes.has(currentLane) && isColdLane(currentLane) && e.key === "j") {
+          toggleLane(currentLane);
+          const first = col?.items[0];
+          setFocus({ lane: currentLane, taskId: first?.id ?? null });
+          return;
+        }
+        if (items.length === 0) {
+          setFocus({ lane: currentLane, taskId: null });
+          return;
+        }
+        const step = e.key === "j" ? 1 : -1;
+        if (e.key === "k" && at <= 0) {
+          setFocus({ lane: currentLane, taskId: null });
+          return;
+        }
+        if (
+          e.key === "j" &&
+          at === items.length - 1 &&
+          col &&
+          col.items.length > items.length
+        ) {
+          const nextTask = col.items[items.length];
+          setRevealed((prev) => ({
+            ...prev,
+            [currentLane]: items.length + density.pageSize,
+          }));
+          if (nextTask) setFocus({ lane: currentLane, taskId: nextTask.id });
+          return;
+        }
+        const next = at < 0 ? (step > 0 ? 0 : items.length - 1) : at + step;
+        const clamped = Math.max(0, Math.min(items.length - 1, next));
+        setFocus({ lane: currentLane, taskId: items[clamped]!.id });
+        return;
+      }
+
+      if (e.key === "c" && isColdLane(currentLane) && !focus?.taskId) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        toggleLane(currentLane);
+        return;
+      }
+
+      if (e.key === "Enter") {
+        if (focus?.taskId) {
+          e.preventDefault();
+          navigate(`/tasks/${focus.taskId}`);
+          return;
+        }
+        if (focus && collapsedLanes.has(focus.lane) && isColdLane(focus.lane)) {
+          e.preventDefault();
+          toggleLane(focus.lane);
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [view, ui.anyOverlayOpen, pendingDelete, columns, collapsedLanes, focus, navigate, toggleLane]);
+
+  useEffect(() => {
+    if (!focus?.taskId || !boardRef.current) return;
+    boardRef.current
+      .querySelector(`[data-task-id="${CSS.escape(focus.taskId)}"]`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [focus]);
 
   const create = async () => {
     setFormError(null);
@@ -283,24 +499,6 @@ export function BoardPage() {
     }
   };
 
-  const runCardAction = async (
-    e: MouseEvent<HTMLButtonElement>,
-    task: Task,
-    label: string,
-    run: (id: string) => Promise<unknown>,
-  ) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const menu = e.currentTarget.closest("details") as HTMLDetailsElement | null;
-    if (menu) menu.open = false;
-    try {
-      await run(task.id);
-      toast.success(`已${label}「${task.title}」`);
-    } catch (err) {
-      toast.error(`${label}失败：${task.title}`, err);
-    }
-  };
-
   const confirmDelete = async () => {
     if (!pendingDelete) return;
     const { id, title } = pendingDelete;
@@ -314,22 +512,39 @@ export function BoardPage() {
     }
   };
 
+  const dismissHint = () => {
+    setHintDismissed(true);
+    try {
+      sessionStorage.setItem(LIST_HINT_KEY, "1");
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <>
-      <div className="board-page">
+      <div className={`board-page${view === "board" ? " board-page--board" : " board-page--list"}`}>
         {loadError && <p className="error board-error">无法刷新任务列表：{loadError}</p>}
 
         <div className="board-heading">
           <div>
             <h1>工作台</h1>
             <p>
-              <span>
-                {activeFilters > 0
-                  ? `${filteredTasks.length} / ${tasks.length} 个任务`
-                  : `${filteredTasks.length} 个任务`}
-              </span>
+              <span>{countLabel}</span>
               <span aria-hidden="true"> · </span>
               <span>{openTaskCount} 个未结束</span>
+              {hiddenKeepCount > 0 && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <button
+                    type="button"
+                    className="board-keep-reveal"
+                    onClick={() => patchFilters({ keep: "all" })}
+                  >
+                    {hiddenKeepCount} 个完成已收起
+                  </button>
+                </>
+              )}
             </p>
           </div>
           <button
@@ -352,32 +567,68 @@ export function BoardPage() {
           pipelineOptions={pipelineFilterOptions}
           laneCounts={laneCounts}
           searchRef={searchRef}
+          view={view}
+          includeArchived={includeArchived}
+          onToggleArchived={toggleArchived}
           trailing={
             <>
               {view === "list" && (
                 <>
-                  <label className="view-select">
-                    <span>分组</span>
-                    <select
-                      value={grouping}
-                      onChange={(e) => setViewParam("group", e.target.value, "lane")}
-                    >
-                      <option value="lane">状态</option>
-                      <option value="repo">仓库</option>
-                      <option value="none">不分组</option>
-                    </select>
-                  </label>
-                  <label className="view-select">
-                    <span>排序</span>
-                    <select
-                      value={sort}
-                      onChange={(e) => setViewParam("sort", e.target.value, "updated")}
-                    >
-                      <option value="updated">最近更新</option>
-                      <option value="created">创建时间</option>
-                      <option value="title">标题</option>
-                    </select>
-                  </label>
+                  <ChoiceChip
+                    label="分组"
+                    value={grouping}
+                    active={grouping !== "lane"}
+                    options={[
+                      { value: "lane", label: "状态" },
+                      { value: "repo", label: "仓库" },
+                      { value: "none", label: "不分组" },
+                    ]}
+                    onChange={(next) => setViewParam("group", next, "lane")}
+                  />
+                  <ChoiceChip
+                    label="排序"
+                    value={sort}
+                    active={sort !== "updated"}
+                    options={[
+                      { value: "updated", label: "最近更新" },
+                      { value: "created", label: "创建时间" },
+                      { value: "title", label: "标题" },
+                    ]}
+                    onChange={(next) => setViewParam("sort", next, "updated")}
+                  />
+                </>
+              )}
+              {view === "board" && (
+                <>
+                  <ChoiceChip
+                    label="密度"
+                    value={density.compact}
+                    active={density.compact !== "auto"}
+                    options={[
+                      { value: "auto", label: "自动" },
+                      { value: "on", label: "紧凑" },
+                      { value: "off", label: "舒适" },
+                    ]}
+                    onChange={(next) => {
+                      const compact = next as DensityPrefs["compact"];
+                      const prefs = { ...density, compact };
+                      setDensity(prefs);
+                      writeDensityPrefs(prefs);
+                    }}
+                  />
+                  <ChoiceChip
+                    label="每列"
+                    value={String(density.pageSize)}
+                    active={density.pageSize !== 10}
+                    options={PAGE_SIZES.map((n) => ({ value: String(n), label: String(n) }))}
+                    onChange={(next) => {
+                      const pageSize = Number(next) as DensityPrefs["pageSize"];
+                      const prefs = { ...density, pageSize };
+                      setDensity(prefs);
+                      writeDensityPrefs(prefs);
+                      setRevealed({});
+                    }}
+                  />
                 </>
               )}
               <div className="view-toggle" role="group" aria-label="视图">
@@ -385,7 +636,7 @@ export function BoardPage() {
                   type="button"
                   className={view === "board" ? "active" : ""}
                   aria-pressed={view === "board"}
-                  onClick={() => setViewParam("view", "board", "board")}
+                  onClick={() => setView("board")}
                 >
                   看板
                 </button>
@@ -393,128 +644,154 @@ export function BoardPage() {
                   type="button"
                   className={view === "list" ? "active" : ""}
                   aria-pressed={view === "list"}
-                  onClick={() => setViewParam("view", "list", "board")}
+                  onClick={() => setView("list")}
                 >
                   列表
+                </button>
+                <button
+                  type="button"
+                  className={view === "focus" ? "active" : ""}
+                  aria-pressed={view === "focus"}
+                  onClick={() => setView("focus")}
+                >
+                  注意
                 </button>
               </div>
             </>
           }
         />
 
-        {view === "list" ? (
+        {showListHint && (
+          <p className="board-list-hint">
+            任务较多，列表更适合扫
+            <button type="button" onClick={() => setView("list")}>
+              切换
+            </button>
+            <button type="button" className="board-list-hint-dismiss" onClick={dismissHint}>
+              关闭
+            </button>
+          </p>
+        )}
+
+        {view === "list" || view === "focus" ? (
           <TaskListView
             tasks={filteredTasks}
             repoName={repoName}
-            grouping={grouping}
+            grouping={view === "focus" ? "lane" : grouping}
             sort={sort}
+            lanes={view === "focus" ? ATTENTION_COLUMNS : COLUMNS}
+            collapsedMore={view === "focus"}
+            defaultCollapsed={view === "focus" ? FOCUS_DEFAULT_COLLAPSED : LIST_DEFAULT_COLLAPSED}
             keyboardEnabled={!ui.anyOverlayOpen && !pendingDelete}
+            onArchived={(next) => {
+              if (next.archived_at && !includeArchived) removeTask(next.id);
+              else applyTask(next);
+            }}
             emptyHint={
               !loaded ? "加载中…" : activeFilters > 0 ? "没有匹配当前筛选的任务" : "还没有任务"
             }
           />
         ) : (
-        <div className="board-viewport">
-          <div
-            className="board"
-            style={{ "--board-columns": visibleColumns.length } as React.CSSProperties}
-          >
-            {visibleColumns.map((col) => {
-              const items = filteredTasks.filter((t) => col.match.includes(t.status));
-              return (
-                <section key={col.key} className={`board-column board-column--${col.key}`}>
-                  <header className="board-column-header">
-                    <div>
-                      <span className="board-column-dot" aria-hidden="true" />
-                      <h2>{col.title}</h2>
-                    </div>
-                    <span className="Counter" aria-label={`${items.length} 个任务`}>
-                      {items.length}
-                    </span>
-                  </header>
-                  <div className="board-column-body">
-                    {items.length === 0 && (
-                      <p className="board-column-empty">
-                        {!loaded ? "加载中…" : activeFilters > 0 ? "无匹配任务" : "暂无任务"}
-                      </p>
+          <div className="board-viewport">
+            <div className="board" ref={boardRef}>
+              {columns.map((col) => {
+                const collapsed = collapsedLanes.has(col.key);
+                const focused = focus?.lane === col.key && !focus.taskId;
+                return (
+                  <section
+                    key={col.key}
+                    className={`board-column board-column--${col.key}${
+                      collapsed ? " board-column--collapsed" : ""
+                    }${focused ? " is-focused" : ""}`}
+                    data-lane={col.key}
+                  >
+                    <header
+                      className="board-column-header"
+                      {...(isColdLane(col.key)
+                        ? {
+                            role: "button" as const,
+                            tabIndex: 0,
+                            "aria-expanded": !collapsed,
+                            "aria-label": collapsed
+                              ? `展开${col.title}列，${col.items.length} 个任务`
+                              : `折叠${col.title}列`,
+                            title: collapsed ? `展开${col.title}（${col.items.length}）` : undefined,
+                            onClick: () => toggleLane(col.key),
+                            onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                toggleLane(col.key);
+                              }
+                            },
+                          }
+                        : {})}
+                    >
+                      <div>
+                        <span className="board-column-dot" aria-hidden="true" />
+                        <h2>{col.title}</h2>
+                      </div>
+                      <span className="Counter" aria-label={`${col.items.length} 个任务`}>
+                        {col.items.length}
+                      </span>
+                    </header>
+                    {!collapsed && (
+                      <div className="board-column-body">
+                        {col.items.length === 0 && (
+                          <p className="board-column-empty">
+                            {!loaded
+                              ? "加载中…"
+                              : activeFilters > 0
+                                ? "无匹配任务"
+                                : "暂无任务"}
+                          </p>
+                        )}
+                        {col.visibleItems.map((t) => (
+                          <BoardCard
+                            key={t.id}
+                            task={t}
+                            repository={repoName(t.repo_id)}
+                            compact={compactCards || isColdLane(col.key)}
+                            active={focus?.taskId === t.id}
+                            onHover={() => setFocus({ lane: col.key, taskId: t.id })}
+                            onRequestDelete={() =>
+                              setPendingDelete({
+                                id: t.id,
+                                title: t.title,
+                                childCount: countDescendantTasks(tasks, t.id),
+                              })
+                            }
+                            onArchived={(next) => {
+                              if (next.archived_at && !includeArchived) removeTask(next.id);
+                              else applyTask(next);
+                            }}
+                          />
+                        ))}
+                        {col.items.length > col.visibleItems.length && (
+                          <button
+                            type="button"
+                            className="board-column-more"
+                            onClick={() =>
+                              setRevealed((prev) => ({
+                                ...prev,
+                                [col.key]: col.visibleItems.length + density.pageSize,
+                              }))
+                            }
+                          >
+                            再显示{" "}
+                            {Math.min(density.pageSize, col.items.length - col.visibleItems.length)}{" "}
+                            个
+                            <span>
+                              {col.visibleItems.length} / {col.items.length}
+                            </span>
+                          </button>
+                        )}
+                      </div>
                     )}
-                    {items.map((t) => {
-                      const actions = taskActionsEnabled(boardActionContext(t));
-                      const repository = repoName(t.repo_id);
-                      return (
-                        <div key={t.id} className="board-card">
-                          <Link className="board-card-main" to={`/tasks/${t.id}`}>
-                            <p className="title" title={t.title}>
-                              <span className="board-card-status">
-                                <StatusIcon status={t.status} size={13} />
-                              </span>
-                              {t.title}
-                            </p>
-                            <div className="board-card-context">
-                              <span className="board-card-repo" title={repository}>
-                                {repository}
-                              </span>
-                              {t.issue_number != null && <span>#{t.issue_number}</span>}
-                            </div>
-                            <div className="meta">
-                              {t.current_node && (
-                                <span className="Label Label--accent">{t.current_node}</span>
-                              )}
-                              {t.branch && (
-                                <span className="Label board-card-branch" title={t.branch}>
-                                  {t.branch}
-                                </span>
-                              )}
-                            </div>
-                            {t.error && (
-                              <p className="board-card-error" title={t.error}>
-                                {t.error}
-                              </p>
-                            )}
-                          </Link>
-                          <details className="board-card-menu">
-                            <summary aria-label={`${t.title}的任务操作`}>⋯</summary>
-                            <div className="board-card-menu-panel">
-                              {MENU_ACTIONS.map((item) => (
-                                <button
-                                  key={item.key}
-                                  type="button"
-                                  disabled={!actions[item.key]}
-                                  onClick={(e) => void runCardAction(e, t, item.label, item.run)}
-                                >
-                                  {item.label}
-                                </button>
-                              ))}
-                              <button
-                                type="button"
-                                className="board-card-menu-danger"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  const menu = e.currentTarget.closest(
-                                    "details",
-                                  ) as HTMLDetailsElement | null;
-                                  if (menu) menu.open = false;
-                                  setPendingDelete({
-                                    id: t.id,
-                                    title: t.title,
-                                    childCount: countDescendantTasks(tasks, t.id),
-                                  });
-                                }}
-                              >
-                                删除
-                              </button>
-                            </div>
-                          </details>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              );
-            })}
+                  </section>
+                );
+              })}
+            </div>
           </div>
-        </div>
         )}
       </div>
 

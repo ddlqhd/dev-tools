@@ -2,6 +2,11 @@ import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import type { PlatformTaskStatus } from "@devtools/shared";
 
+/** Terminal tasks idle longer than this are swept out of the default list. */
+export const ARCHIVE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+export const ARCHIVE_SWEEP_MS = 60 * 60 * 1000;
+export const ARCHIVE_TERMINAL_STATUSES = ["done", "merged", "failed", "cancelled"] as const;
+
 export interface RepoRow {
   id: string;
   platform: string;
@@ -39,6 +44,8 @@ export interface TaskRow {
   next_retry_at?: string | null;
   /** For derived tasks (e.g. ci-fix): the task that produced the PR. */
   parent_task_id?: string | null;
+  /** Set when the task is archived; default listTasks hides these rows. */
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -103,6 +110,7 @@ export class PlatformStore {
         retry_count INTEGER NOT NULL DEFAULT 0,
         next_retry_at TEXT,
         parent_task_id TEXT,
+        archived_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -165,6 +173,9 @@ export class PlatformStore {
     }
     if (!taskCols.has("parent_task_id")) {
       this.db.exec(`ALTER TABLE tasks ADD COLUMN parent_task_id TEXT`);
+    }
+    if (!taskCols.has("archived_at")) {
+      this.db.exec(`ALTER TABLE tasks ADD COLUMN archived_at TEXT`);
     }
 
     const repoCols = new Set(
@@ -379,7 +390,11 @@ export class PlatformStore {
       .get(repoId, issueNumber) as unknown as TaskRow | undefined;
   }
 
-  listTasks(filter?: { status?: string; repoId?: string }): TaskRow[] {
+  /**
+   * Default omits archived rows. Pass `includeArchived: true` for a full scan
+   * (exports, admin, or any caller that must not silently drop history).
+   */
+  listTasks(filter?: { status?: string; repoId?: string; includeArchived?: boolean }): TaskRow[] {
     let sql = `SELECT * FROM tasks WHERE 1=1`;
     const params: string[] = [];
     if (filter?.status) {
@@ -390,8 +405,49 @@ export class PlatformStore {
       sql += ` AND repo_id = ?`;
       params.push(filter.repoId);
     }
+    if (!filter?.includeArchived) {
+      sql += ` AND archived_at IS NULL`;
+    }
     sql += ` ORDER BY created_at DESC`;
     return this.db.prepare(sql).all(...params) as unknown as TaskRow[];
+  }
+
+  /** Hide terminal tasks that have been idle longer than 30 days. Returns the rows just archived. */
+  archiveStaleTerminals(now: Date = new Date()): TaskRow[] {
+    const cutoff = new Date(now.getTime() - ARCHIVE_AFTER_MS).toISOString();
+    const at = now.toISOString();
+    const stale = this.db
+      .prepare(
+        `SELECT id FROM tasks
+         WHERE archived_at IS NULL
+           AND status IN ('done','merged','failed','cancelled')
+           AND updated_at < ?`,
+      )
+      .all(cutoff) as Array<{ id: string }>;
+    if (stale.length === 0) return [];
+    const update = this.db.prepare(`UPDATE tasks SET archived_at = ? WHERE id = ?`);
+    const out: TaskRow[] = [];
+    for (const row of stale) {
+      update.run(at, row.id);
+      const next = this.getTask(row.id);
+      if (next) out.push(next);
+    }
+    return out;
+  }
+
+  setTaskArchived(id: string, archived: boolean, now: Date = new Date()): TaskRow {
+    const cur = this.getTask(id);
+    if (!cur) throw new Error(`task not found: ${id}`);
+    if (archived && !(ARCHIVE_TERMINAL_STATUSES as readonly string[]).includes(cur.status)) {
+      throw new Error("only terminal tasks can be archived");
+    }
+    const at = now.toISOString();
+    this.db
+      .prepare(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`)
+      .run(archived ? at : null, at, id);
+    const next = this.getTask(id);
+    if (!next) throw new Error(`task not found: ${id}`);
+    return next;
   }
 
   dequeueCandidates(limit: number): TaskRow[] {
