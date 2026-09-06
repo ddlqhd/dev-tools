@@ -337,6 +337,9 @@ export function BoardPage() {
       .filter((col) => col.items.length > 0 || !isColdLane(col.key));
   }, [filters.lanes, filteredTasks, revealed, density.pageSize]);
 
+  const hotColumns = useMemo(() => columns.filter((col) => !isColdLane(col.key)), [columns]);
+  const coldColumns = useMemo(() => columns.filter((col) => isColdLane(col.key)), [columns]);
+
   const collapsedLanes = useMemo(() => {
     const set = new Set<string>();
     for (const col of columns) {
@@ -521,6 +524,98 @@ export function BoardPage() {
     }
   };
 
+  const renderColumn = (col: (typeof columns)[number]) => {
+    const collapsed = collapsedLanes.has(col.key);
+    const focused = focus?.lane === col.key && !focus.taskId;
+    const cold = isColdLane(col.key);
+    return (
+      <section
+        key={col.key}
+        className={`board-column board-column--${col.key}${cold ? " board-column--cold" : ""}${
+          collapsed ? " board-column--collapsed" : ""
+        }${focused ? " is-focused" : ""}`}
+        data-lane={col.key}
+      >
+        <header
+          className="board-column-header"
+          {...(cold
+            ? {
+                role: "button" as const,
+                tabIndex: 0,
+                "aria-expanded": !collapsed,
+                "aria-label": collapsed
+                  ? `展开${col.title}列，${col.items.length} 个任务`
+                  : `折叠${col.title}列`,
+                title: collapsed ? `展开${col.title}（${col.items.length}）` : undefined,
+                onClick: () => toggleLane(col.key),
+                onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleLane(col.key);
+                  }
+                },
+              }
+            : {})}
+        >
+          <div>
+            <span className="board-column-dot" aria-hidden="true" />
+            <h2>{col.title}</h2>
+          </div>
+          <span className="Counter" aria-label={`${col.items.length} 个任务`}>
+            {col.items.length}
+          </span>
+        </header>
+        {!collapsed && (
+          <div className="board-column-body">
+            {col.items.length === 0 && (
+              <p className="board-column-empty">
+                {!loaded ? "加载中…" : activeFilters > 0 ? "无匹配任务" : "暂无任务"}
+              </p>
+            )}
+            {col.visibleItems.map((t) => (
+              <BoardCard
+                key={t.id}
+                task={t}
+                repository={repoName(t.repo_id)}
+                compact={compactCards || cold}
+                active={focus?.taskId === t.id}
+                onHover={() => setFocus({ lane: col.key, taskId: t.id })}
+                onRequestDelete={() =>
+                  setPendingDelete({
+                    id: t.id,
+                    title: t.title,
+                    childCount: countDescendantTasks(tasks, t.id),
+                  })
+                }
+                onArchived={(next) => {
+                  if (next.archived_at && !includeArchived) removeTask(next.id);
+                  else applyTask(next);
+                }}
+              />
+            ))}
+            {col.items.length > col.visibleItems.length && (
+              <button
+                type="button"
+                className="board-column-more"
+                onClick={() =>
+                  setRevealed((prev) => ({
+                    ...prev,
+                    [col.key]: col.visibleItems.length + density.pageSize,
+                  }))
+                }
+              >
+                再显示 {Math.min(density.pageSize, col.items.length - col.visibleItems.length)} 个
+                <span>
+                  {col.visibleItems.length} / {col.items.length}
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+    );
+  };
+
   return (
     <>
       <div className={`board-page${view === "board" ? " board-page--board" : " board-page--list"}`}>
@@ -694,102 +789,12 @@ export function BoardPage() {
         ) : (
           <div className="board-viewport">
             <div className="board" ref={boardRef}>
-              {columns.map((col) => {
-                const collapsed = collapsedLanes.has(col.key);
-                const focused = focus?.lane === col.key && !focus.taskId;
-                return (
-                  <section
-                    key={col.key}
-                    className={`board-column board-column--${col.key}${
-                      collapsed ? " board-column--collapsed" : ""
-                    }${focused ? " is-focused" : ""}`}
-                    data-lane={col.key}
-                  >
-                    <header
-                      className="board-column-header"
-                      {...(isColdLane(col.key)
-                        ? {
-                            role: "button" as const,
-                            tabIndex: 0,
-                            "aria-expanded": !collapsed,
-                            "aria-label": collapsed
-                              ? `展开${col.title}列，${col.items.length} 个任务`
-                              : `折叠${col.title}列`,
-                            title: collapsed ? `展开${col.title}（${col.items.length}）` : undefined,
-                            onClick: () => toggleLane(col.key),
-                            onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                toggleLane(col.key);
-                              }
-                            },
-                          }
-                        : {})}
-                    >
-                      <div>
-                        <span className="board-column-dot" aria-hidden="true" />
-                        <h2>{col.title}</h2>
-                      </div>
-                      <span className="Counter" aria-label={`${col.items.length} 个任务`}>
-                        {col.items.length}
-                      </span>
-                    </header>
-                    {!collapsed && (
-                      <div className="board-column-body">
-                        {col.items.length === 0 && (
-                          <p className="board-column-empty">
-                            {!loaded
-                              ? "加载中…"
-                              : activeFilters > 0
-                                ? "无匹配任务"
-                                : "暂无任务"}
-                          </p>
-                        )}
-                        {col.visibleItems.map((t) => (
-                          <BoardCard
-                            key={t.id}
-                            task={t}
-                            repository={repoName(t.repo_id)}
-                            compact={compactCards || isColdLane(col.key)}
-                            active={focus?.taskId === t.id}
-                            onHover={() => setFocus({ lane: col.key, taskId: t.id })}
-                            onRequestDelete={() =>
-                              setPendingDelete({
-                                id: t.id,
-                                title: t.title,
-                                childCount: countDescendantTasks(tasks, t.id),
-                              })
-                            }
-                            onArchived={(next) => {
-                              if (next.archived_at && !includeArchived) removeTask(next.id);
-                              else applyTask(next);
-                            }}
-                          />
-                        ))}
-                        {col.items.length > col.visibleItems.length && (
-                          <button
-                            type="button"
-                            className="board-column-more"
-                            onClick={() =>
-                              setRevealed((prev) => ({
-                                ...prev,
-                                [col.key]: col.visibleItems.length + density.pageSize,
-                              }))
-                            }
-                          >
-                            再显示{" "}
-                            {Math.min(density.pageSize, col.items.length - col.visibleItems.length)}{" "}
-                            个
-                            <span>
-                              {col.visibleItems.length} / {col.items.length}
-                            </span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
+              {hotColumns.map(renderColumn)}
+              {coldColumns.length > 0 && (
+                <div className="board-cold">
+                  {coldColumns.map(renderColumn)}
+                </div>
+              )}
             </div>
           </div>
         )}

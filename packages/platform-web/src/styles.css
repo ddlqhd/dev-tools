@@ -179,6 +179,8 @@ code {
 
 .container--board {
   flex: 1;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2049,16 +2051,33 @@ label {
 }
 
 /*
- * One row of columns that share leftover width. Collapsed cold lanes take a
- * fixed rail; the rest grow. The board itself is viewport-tall so each column
- * scrolls internally instead of stretching the page.
+ * Board width is locked to the viewport. Done/failed are a fixed 240px
+ * (40px rail when folded); the four live columns share whatever is left,
+ * so folding widens them without changing the overall board width.
  */
 .board {
+  --board-cold-width: 240px;
+  --board-cold-rail: 40px;
   display: flex;
   gap: var(--space-3);
   align-items: stretch;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
   height: 100%;
-  min-width: 100%;
+}
+
+.board-cold {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+
+.board-cold:only-child {
+  flex: 1 1 auto;
 }
 
 .board-column {
@@ -2066,7 +2085,7 @@ label {
   display: flex;
   flex-direction: column;
   flex: 1 1 0;
-  min-width: 184px;
+  min-width: 0;
   min-height: 0;
   background: var(--canvas-subtle);
   border: 1px solid var(--border-muted);
@@ -2078,11 +2097,27 @@ label {
   border-color: color-mix(in srgb, var(--accent-fg) 55%, var(--border-default));
 }
 
+.board-column--cold {
+  flex: 0 0 var(--board-cold-width);
+  width: var(--board-cold-width);
+  max-width: var(--board-cold-width);
+  transition:
+    width 180ms var(--ease-out),
+    flex-basis 180ms var(--ease-out),
+    max-width 180ms var(--ease-out);
+}
+
 .board-column--collapsed {
-  flex: 0 0 40px;
-  min-width: 40px;
-  width: 40px;
+  flex: 0 0 var(--board-cold-rail);
+  width: var(--board-cold-rail);
+  max-width: var(--board-cold-rail);
   cursor: pointer;
+}
+
+.board-cold:only-child .board-column--cold:not(.board-column--collapsed) {
+  flex: 1 1 0;
+  width: auto;
+  min-width: var(--board-cold-width);
 }
 
 .board-column--running {
@@ -2482,9 +2517,23 @@ label {
     scroll-snap-type: x proximity;
   }
 
+  .board {
+    width: max-content;
+    max-width: none;
+    min-width: 100%;
+  }
+
+  .board-cold,
+  .board-cold:only-child {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
   .board-column:not(.board-column--collapsed) {
     flex: 0 0 240px;
+    width: 240px;
     min-width: 240px;
+    max-width: 240px;
   }
 
   .board-column {
