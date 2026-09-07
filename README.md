@@ -14,6 +14,7 @@
 
 ```bash
 npm i -g ./devtools-codeloop-0.1.0.tgz
+codeloop init                  # 可选；在目标仓库创建 .codeloop/
 codeloop doctor
 codeloop-platform            # 控制台默认 http://127.0.0.1:4800
 ```

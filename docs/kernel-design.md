@@ -468,6 +468,7 @@ CLI 本地使用时不起服务，直接进程内调用内核库；`serve` 模�
 ## 8. CLI 设计
 
 ```
+codeloop init                  # 可选: 在仓库创建 .codeloop/ 与默认配置; git 仓库会写入 .gitignore
 codeloop run "<需求>"          # 创建并运行任务(默认 default-codeloop), 进入交互式进度界面
 codeloop run -f req.md --pipeline quick-fix --no-gate
 codeloop pipelines             # 列出内置与自定义 pipeline 模板(含静态校验结果)
@@ -480,7 +481,7 @@ codeloop reject <taskId> -m "改用方案B"
 codeloop inject <taskId> -m "不要动 legacy/"
 codeloop diff <taskId>         # 当前分支 diff
 codeloop serve [--port 4700 --token ...]    # 守护模式(供 L2 / 远程)
-codeloop doctor                # 检查引擎 CLI 安装/登录状态
+codeloop doctor                # 检查引擎 CLI 安装/登录与本地配置(只读, 不创建 .codeloop/)
 ```
 
 交互式界面（Ink 渲染）：上方为按任务的 pipeline 快照动态渲染的节点进度条（`plan ✓ → planReview ✓ → code ● → …`，loop 块显示轮次 `reviewLoop 2/5`），中间滚动引擎动作摘要（`engine.chunk` 的 toolUse/fileChange），下方状态栏显示用量/预算；到达审批门时就地弹出 approve/reject/edit 选择。

@@ -25,7 +25,16 @@ fix loop → verify → commit) over a git repository, using an engine CLI
   (default: `process.cwd()`). When working on a different repository, always
   pass `--repo /path/to/target-repo`.
 - **Health check**: `codeloop doctor` verifies engine CLI install/login and
-  local config; exit code 0 = all ok.
+  local config (read-only; it does not create `.codeloop/`). If the repo is
+  not initialized, the `config` check fails and tells you to run `codeloop init`.
+- **Repo layout**: `codeloop init [--repo <path>]` creates `.codeloop/`
+  (config, pipelines, worktrees, tasks). In a git repo it creates `.gitignore`
+  containing `.codeloop/` if missing, or appends that entry to an existing one.
+  Idempotent. Optional `--with-skills` also runs `sync-skills` (if the skills
+  bundle is missing, layout is still created and the command exits 1).
+  Inspect/control commands (`doctor`, `list`, `show`, `watch`, `pause`,
+  `resume`, `abort`, `inject`, `approve`, `reject`) do not create `.codeloop/`.
+  `run` and `serve` still create the layout on first use if you skip `init`.
 - **Prerequisite**: Node.js ≥ 22.13, git, and a logged-in engine CLI
   (e.g. `agent login` for Cursor).
 
@@ -56,6 +65,18 @@ argument — **capture it from the `run` output and reuse it**.
 
 ## Command reference
 
+### init
+
+```bash
+codeloop init [--repo <path>] [--with-skills]
+```
+
+Create `.codeloop/` layout and default `config.yaml`. Idempotent: already-present
+paths are reported as `exists`; missing prompts in an existing config are
+reported as `updated`. In a git repo, creates `.gitignore` (or appends) so
+`.codeloop/` is ignored. Does not probe engines. `run` / `serve` still
+lazy-create this layout. Other commands do not.
+
 ### doctor
 
 ```bash
@@ -63,6 +84,8 @@ codeloop doctor [--repo <path>]
 ```
 
 Check engine CLI install/login and local config. Prints `✓`/`✗` per check.
+Read-only: does not create or rewrite `.codeloop/`. If the repo is not
+initialized, the `config` check fails with `run: codeloop init --repo …`.
 Exit 0 if all ok, 1 otherwise.
 
 ### pipelines
@@ -81,6 +104,8 @@ codeloop list [--repo <path>]
 ```
 
 List tasks in the repo: `id  status  pipeline  branch  current_node`.
+If the repo is not initialized (no `.codeloop/config.yaml`), exits 1 with a
+message to run `codeloop init`. Does not create `kernel.db`.
 
 ### show
 
@@ -155,7 +180,8 @@ codeloop watch <taskId> [--repo <path>] [--after <seq>] [--quiet] [--plain]
 
 Attach to a running/suspended task and stream events. `--after <seq>` replays
 events after a sequence number (resume after disconnect). Without a daemon,
-replays historical events from disk.
+replays historical events from disk. Does not create `.codeloop/`; if the repo
+is not initialized, exits 1 with a message to run `codeloop init`.
 
 ### pause / resume / abort
 
@@ -219,20 +245,22 @@ as a human, or as an agent using this skill.
    - **Take over manually**: work in `paths.worktreePath` using the
      requirement, plan, and review comments as context.
 
-`show` does not change task state. `watch` is live follow only.
+`show` does not change task state or rewrite config. `watch` is live follow
+only and does not create `.codeloop/`. `list` / `doctor` are read-only.
 
 ## Standard workflow
 
-1. `codeloop doctor` — verify engine CLI ready.
-2. `codeloop run "<requirement>" --repo <target>` — create and run the task.
+1. `codeloop init` — optional; creates `.codeloop/` so you can edit config first.
+2. `codeloop doctor` — verify engine CLI ready (read-only).
+3. `codeloop run "<requirement>" --repo <target>` — create and run the task.
    **Capture `task: <taskId>` from the output** (or get it via `codeloop list`).
-3. `codeloop watch <taskId>` — follow progress; when the task hits a gate
+4. `codeloop watch <taskId>` — follow progress; when the task hits a gate
    (`status: suspended`), review the output.
-4. `codeloop approve <taskId>` to pass the gate, or
+5. `codeloop approve <taskId>` to pass the gate, or
    `codeloop reject <taskId> -m "<review comments>"` to send back for fixes.
-5. If the task pauses or blocks, use `codeloop resume <taskId> [-m ...]` or
+6. If the task pauses or blocks, use `codeloop resume <taskId> [-m ...]` or
    `codeloop inject <taskId> -m ...` to steer it.
-6. `codeloop show <taskId>` for the handover snapshot (paths, artifacts, git,
+7. `codeloop show <taskId>` for the handover snapshot (paths, artifacts, git,
    stages, usage). Same command for a failed or aborted run.
 
 ## Notes

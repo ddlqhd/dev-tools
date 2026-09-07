@@ -1,6 +1,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KernelStore, EventLog, ArtifactStore, CoalescingJsonlWriter, type TaskStatus } from "../src/store/index.js";
@@ -81,6 +82,17 @@ test("KernelStore: checkpoint upsert", () => {
   // upsert replaces
   store.saveCheckpoint({ ...cp, node_id: "commit", updated_at: new Date().toISOString() });
   assert.equal(store.getCheckpoint("t1")?.node_id, "commit");
+});
+
+test("KernelStore: readOnly missing db does not create kernel.db", () => {
+  const missing = join(dir, "no-such-root");
+  const ro = new KernelStore(missing, { readOnly: true });
+  try {
+    assert.deepEqual(ro.listTasks(), []);
+    assert.equal(existsSync(join(missing, "kernel.db")), false);
+  } finally {
+    ro.close();
+  }
 });
 
 test("KernelStore: reuse of one database instance stays consistent", () => {

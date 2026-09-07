@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isMap, parse as parseYaml, parseDocument, Scalar, stringify as stringifyYaml } from "yaml";
@@ -146,41 +147,100 @@ export function backfillEnginePrompts(raw: string): string {
   return changed ? String(doc) : raw;
 }
 
-export async function ensureCodeloopDir(repoPath: string): Promise<string> {
+export class CodeloopNotInitializedError extends Error {
+  readonly repoPath: string;
+  constructor(repoPath: string) {
+    super(`codeloop is not initialized in ${repoPath} — run: codeloop init --repo ${repoPath}`);
+    this.name = "CodeloopNotInitializedError";
+    this.repoPath = repoPath;
+  }
+}
+
+export type InitActionStatus = "created" | "exists" | "updated";
+
+export interface InitAction {
+  path: string;
+  status: InitActionStatus;
+}
+
+export interface InitResult {
+  root: string;
+  actions: InitAction[];
+}
+
+export function isCodeloopInitialized(repoPath: string): boolean {
+  return existsSync(join(repoPath, ".codeloop", "config.yaml"));
+}
+
+function gitignoreMentionsCodeloop(content: string): boolean {
+  return content.split("\n").some((l) => l.trim() === ".codeloop/" || l.trim() === ".codeloop");
+}
+
+/** Create `.codeloop/` layout and default config. Idempotent; reports what changed. */
+export async function initCodeloop(repoPath: string): Promise<InitResult> {
   const root = join(repoPath, ".codeloop");
-  await mkdir(join(root, "pipelines"), { recursive: true });
-  await mkdir(join(root, "worktrees"), { recursive: true });
-  await mkdir(join(root, "tasks"), { recursive: true });
+  const actions: InitAction[] = [];
+
+  const rootExisted = existsSync(root);
+  await mkdir(root, { recursive: true });
+  actions.push({ path: ".codeloop", status: rootExisted ? "exists" : "created" });
+
+  for (const dir of ["pipelines", "worktrees", "tasks"] as const) {
+    const abs = join(root, dir);
+    const existed = existsSync(abs);
+    await mkdir(abs, { recursive: true });
+    actions.push({ path: `.codeloop/${dir}`, status: existed ? "exists" : "created" });
+  }
 
   const configPath = join(root, "config.yaml");
-  try {
+  if (!existsSync(configPath)) {
+    await writeFile(configPath, DEFAULT_CONFIG_YAML, "utf8");
+    actions.push({ path: ".codeloop/config.yaml", status: "created" });
+  } else {
     const existing = await readFile(configPath, "utf8");
     const updated = backfillEnginePrompts(existing);
     if (updated !== existing) {
       await writeFile(configPath, updated, "utf8");
+      actions.push({ path: ".codeloop/config.yaml", status: "updated" });
+    } else {
+      actions.push({ path: ".codeloop/config.yaml", status: "exists" });
     }
-  } catch {
-    await writeFile(configPath, DEFAULT_CONFIG_YAML, "utf8");
   }
 
-  // Ensure .codeloop is gitignored in the target repo
   const gi = join(repoPath, ".gitignore");
-  try {
+  if (existsSync(gi)) {
     const content = await readFile(gi, "utf8");
-    if (!content.split("\n").some((l) => l.trim() === ".codeloop/" || l.trim() === ".codeloop")) {
+    if (gitignoreMentionsCodeloop(content)) {
+      actions.push({ path: ".gitignore", status: "exists" });
+    } else {
       await writeFile(gi, `${content.trimEnd()}\n\n.codeloop/\n`, "utf8");
+      actions.push({ path: ".gitignore", status: "updated" });
     }
-  } catch {
-    // no gitignore — skip
+  } else if (existsSync(join(repoPath, ".git"))) {
+    await writeFile(gi, ".codeloop/\n", "utf8");
+    actions.push({ path: ".gitignore", status: "created" });
   }
 
-  return root;
+  return { root, actions };
+}
+
+export async function ensureCodeloopDir(repoPath: string): Promise<string> {
+  const result = await initCodeloop(repoPath);
+  return result.root;
+}
+
+/** Read config without creating or rewriting files. */
+export async function readConfig(repoPath: string): Promise<CodeloopConfig> {
+  if (!isCodeloopInitialized(repoPath)) {
+    throw new CodeloopNotInitializedError(repoPath);
+  }
+  const raw = await readFile(join(repoPath, ".codeloop", "config.yaml"), "utf8");
+  return CodeloopConfigSchema.parse(parseYaml(raw));
 }
 
 export async function loadConfig(repoPath: string): Promise<CodeloopConfig> {
   await ensureCodeloopDir(repoPath);
-  const raw = await readFile(join(repoPath, ".codeloop", "config.yaml"), "utf8");
-  return CodeloopConfigSchema.parse(parseYaml(raw));
+  return readConfig(repoPath);
 }
 
 export async function writeConfig(repoPath: string, config: CodeloopConfig): Promise<void> {

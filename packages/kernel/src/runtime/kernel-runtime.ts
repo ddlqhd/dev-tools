@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { access, readdir, readFile, rm, stat, symlink, writeFile, unlink } from "node:fs/promises";
 import { extname, join } from "node:path";
 import type {
@@ -13,7 +14,10 @@ import type {
 import {
   getMissingEngineConfigs,
   loadConfig,
+  readConfig,
   ensureCodeloopDir,
+  isCodeloopInitialized,
+  CodeloopNotInitializedError,
   type CodeloopConfig,
 } from "../config.js";
 import {
@@ -485,6 +489,25 @@ export class KernelRuntime {
     return new KernelRuntime(repoPath, root, new KernelStore(root));
   }
 
+  /**
+   * Open an already-initialized repo. Does not create `.codeloop/`, rewrite
+   * `config.yaml`, or create `kernel.db`.
+   */
+  static async openExisting(
+    repoPath: string,
+    opts?: { readOnly?: boolean },
+  ): Promise<KernelRuntime> {
+    if (!isCodeloopInitialized(repoPath)) {
+      throw new CodeloopNotInitializedError(repoPath);
+    }
+    const root = join(repoPath, ".codeloop");
+    const dbExists = existsSync(join(root, "kernel.db"));
+    const store = new KernelStore(root, {
+      readOnly: opts?.readOnly || !dbExists,
+    });
+    return new KernelRuntime(repoPath, root, store);
+  }
+
   /** Write any in-memory thinking/text buffers so a shutdown does not drop them. */
   async flushEventLogs(): Promise<void> {
     await Promise.all([...this.handles.values()].map((handle) => handle.events.flush()));
@@ -534,7 +557,7 @@ export class KernelRuntime {
       this.clearIntervention(taskId);
     }
 
-    const config = await loadConfig(task.repo_path);
+    const config = await readConfig(task.repo_path);
     await removeTaskWorktree({
       repoPath: task.repo_path,
       worktreePath: task.worktree_path,
@@ -683,7 +706,7 @@ export class KernelRuntime {
     const task = this.store.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
-    const config = await loadConfig(task.repo_path);
+    const config = await readConfig(task.repo_path);
     const rawYaml = await readFile(
       join(this.store.taskDir(taskId), "pipeline.snapshot.yaml"),
       "utf8",

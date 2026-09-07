@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -47,14 +48,7 @@ export interface CheckpointRow {
   updated_at: string;
 }
 
-export class KernelStore {
-  readonly db: DatabaseSync;
-  readonly rootDir: string;
-
-  constructor(rootDir: string) {
-    this.rootDir = rootDir;
-    this.db = new DatabaseSync(join(rootDir, "kernel.db"));
-    this.db.exec(`
+const SCHEMA_SQL = `
       CREATE TABLE IF NOT EXISTS tasks (
         id TEXT PRIMARY KEY,
         requirement TEXT NOT NULL,
@@ -93,7 +87,31 @@ export class KernelStore {
         cost_usd REAL,
         ts TEXT NOT NULL
       );
-    `);
+    `;
+
+export interface KernelStoreOptions {
+  /** Open without creating `kernel.db` or running migrations. Missing file → empty in-memory db. */
+  readOnly?: boolean;
+}
+
+export class KernelStore {
+  readonly db: DatabaseSync;
+  readonly rootDir: string;
+
+  constructor(rootDir: string, options?: KernelStoreOptions) {
+    this.rootDir = rootDir;
+    const dbPath = join(rootDir, "kernel.db");
+    if (options?.readOnly) {
+      if (!existsSync(dbPath)) {
+        this.db = new DatabaseSync(":memory:");
+        this.db.exec(SCHEMA_SQL);
+        return;
+      }
+      this.db = new DatabaseSync(dbPath, { readOnly: true });
+      return;
+    }
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec(SCHEMA_SQL);
     this.migrateSchema();
   }
 
