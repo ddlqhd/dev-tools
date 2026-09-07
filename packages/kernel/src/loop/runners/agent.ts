@@ -1,10 +1,12 @@
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveNodeEngineKey, type EngineChunk, type NodeSpec } from "@devtools/shared";
+import { isPlanAgent, resolveNodeEngineKey, type EngineChunk, type NodeSpec } from "@devtools/shared";
 import { renderPrompt } from "../../prompts/index.js";
+import { loadPromptArtifacts } from "../artifact-inputs.js";
 import type { NodeContext, NodeResult, NodeRunner } from "../node.js";
 
 const PLAN_FILE = ".codeloop-plan.md";
+const CAPTURED_PLAN_MIN_CHARS = 40;
 
 export class AgentNodeRunner implements NodeRunner {
   readonly type = "agent" as const;
@@ -12,17 +14,16 @@ export class AgentNodeRunner implements NodeRunner {
   async run(spec: NodeSpec, ctx: NodeContext): Promise<NodeResult> {
     if (!ctx.engine) throw new Error("agent node requires an engine session");
     const template = spec.promptTemplate ?? "code";
-    const planDoc = await ctx.artifacts.readText("planDoc");
-    const reviewComments = await ctx.artifacts.readText("reviewComments", "json");
-    const wantsPlanDoc =
-      template === "plan" || (spec.outputs ?? []).includes("planDoc");
+    const artifacts = await loadPromptArtifacts(spec, ctx.artifacts);
+    const wantsPlanDoc = isPlanAgent(spec);
     const engineKey = resolveNodeEngineKey(spec);
     if (!engineKey) throw new Error("agent node requires an engine alias");
 
     const prompt = renderPrompt(engineKey, {
       requirement: ctx.task.requirement,
-      planDoc: planDoc ?? undefined,
-      reviewComments: reviewComments ?? undefined,
+      planDoc: artifacts.planDoc,
+      planComments: artifacts.planComments,
+      reviewComments: artifacts.reviewComments,
       instructions: ctx.instructions,
     }, ctx.config.engines[engineKey]?.prompt);
 
@@ -118,14 +119,14 @@ export class AgentNodeRunner implements NodeRunner {
   }
 }
 
-function resolvePlanContent(result: {
+export function resolvePlanContent(result: {
   text: string;
   capturedPlanMarkdown?: string;
 }): string | null {
   // The plan tool only fires when the agent deliberately submits a plan, so its
   // content needs no structural sniffing — just enough substance to be a plan.
   const captured = result.capturedPlanMarkdown?.trim();
-  if (captured && captured.length >= 80) return captured;
+  if (captured && captured.length >= CAPTURED_PLAN_MIN_CHARS) return captured;
 
   // Accept final assistant text only if it already looks like a structured plan,
   // not progress chatter ("正在生成…").
@@ -136,7 +137,7 @@ function resolvePlanContent(result: {
 
 export function looksLikePlan(text: string): boolean {
   const t = text.trim();
-  if (t.length < 80) return false;
+  if (t.length < 40) return false;
   // Reject pure progress narration
   if (/^(先|正在|我将|I'll |I will |Let me )/i.test(t) && !/^#\s/m.test(t)) {
     return false;

@@ -9,6 +9,7 @@ nodes:
   codeReview:
     type: review
     engine: codeReviewer
+    inputs: [planDoc]
     severityGate: major
     outputs: [reviewComments]
   fixReview:
@@ -19,6 +20,7 @@ nodes:
   verify:
     type: verify
     engine: verifier
+    inputs: [planDoc]
     outputs: [verifyReport]
     onFail:
       goto: reviewLoop
@@ -26,6 +28,7 @@ nodes:
   commit:
     type: commit
     engine: committer
+    inputs: [planDoc]
     messageStyle: conventional
 
 flow:

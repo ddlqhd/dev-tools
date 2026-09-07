@@ -8,6 +8,7 @@ nodes:
     engine: planner
     readonly: true
     promptTemplate: plan
+    inputs: [planDoc, planComments]
     outputs: [planDoc]
   planReview:
     type: review

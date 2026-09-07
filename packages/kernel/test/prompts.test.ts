@@ -64,3 +64,53 @@ test("renderPrompt: coder planDoc fallback matches the previous hardcoded text",
   const out = renderPrompt("coder", ctx());
   assert.match(out, /no separate plan artifact — infer from requirement/);
 });
+
+test("renderPrompt: planComments omitted when empty", () => {
+  const out = renderPrompt("planner", ctx());
+  assert.doesNotMatch(out, /^## Review comments to address/m);
+});
+
+test("renderPrompt: planComments expand when present", () => {
+  const out = renderPrompt(
+    "planner",
+    ctx({ planComments: '{"comments":[{"comment":"too vague"}]}' }),
+  );
+  assert.match(out, /## Review comments to address/);
+  assert.match(out, /too vague/);
+  assert.match(out, /Address every review comment in the "Review comments to address" section/);
+});
+
+test("renderPrompt: planComments not duplicated into instructions when slotted", () => {
+  const out = renderPrompt(
+    "planner",
+    ctx({
+      planComments: '{"comments":[{"comment":"too vague"}]}',
+      instructions: ["Gate rejected — revise the plan"],
+    }),
+  );
+  assert.equal(
+    [...out.matchAll(/## Review comments to address/g)].length,
+    1,
+  );
+  assert.match(out, /## Human instructions \(must follow\)\n- Gate rejected — revise the plan/);
+});
+
+test("renderPrompt: planComments fold into instructions when the template omits the slot", () => {
+  const oldPlanner = `You are planning.
+
+## Requirement
+{{requirement}}
+{{instructions}}
+{{previousPlan}}
+
+Address every review comment listed in the instructions above.
+`;
+  const out = renderPrompt(
+    "planner",
+    ctx({ planComments: '{"comments":[{"comment":"too vague"}]}' }),
+    oldPlanner,
+  );
+  assert.match(out, /## Review comments to address/);
+  assert.match(out, /too vague/);
+  assert.doesNotMatch(out, /\{\{planComments\}\}/);
+});

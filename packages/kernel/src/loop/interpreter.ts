@@ -1,4 +1,5 @@
 import {
+  isPlanAgent,
   resolveNodeEngineKey,
   type FlowStep,
   type InterventionDecision,
@@ -260,12 +261,8 @@ export class PipelineInterpreter {
               ],
         });
         this.nodeOutcomes[reviewNodeId] = { passed: false };
-        // Feed reject comments into instruction queue for next plan turn
-        if (comments.length) {
-          this.instructionQueue.push(
-            `Gate rejected with comments:\n${comments.map((c) => `- [${c.severity}] ${c.comment}`).join("\n")}`,
-          );
-        }
+        // Comments live on the planComments artifact; keep a short instruction only.
+        this.instructionQueue.push("Gate rejected — revise the plan");
         i = targetIndex;
         continue;
       }
@@ -542,10 +539,7 @@ export class PipelineInterpreter {
     const drivesTooling = spec.type === "verify" || spec.type === "commit";
     // Plan turns run the engine's native read-only planning mode; the plan comes
     // back through the stream, so they need no write access at all.
-    const planMode =
-      !drivesTooling &&
-      spec.type === "agent" &&
-      (spec.promptTemplate === "plan" || (spec.outputs ?? []).includes("planDoc"));
+    const planMode = !drivesTooling && isPlanAgent(spec);
     const artifactWriteOnly = !drivesTooling && spec.type === "review";
     const readonly = drivesTooling
       ? false

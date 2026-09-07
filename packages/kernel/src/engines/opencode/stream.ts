@@ -16,6 +16,7 @@
  */
 
 import type { EngineChunk, EngineTurnUsage } from "@devtools/shared";
+import { extractPlanMarkdown, isPlanToolInput } from "../plan-capture.js";
 
 export interface OpenCodeStreamState {
   sessionId?: string;
@@ -152,6 +153,11 @@ export function parseOpenCodeStreamLine(
       chunks.push({ kind: "toolUse", tool: prettyToolName(tool), summary: filePath });
       chunks.push({ kind: "fileChange", path: filePath, op: tool === "write" ? "create" : "edit" });
       return chunks;
+    }
+
+    if (isPlanToolInput(tool)) {
+      const md = extractPlanMarkdown(input);
+      if (md) state.capturedPlanMarkdown = md;
     }
 
     const summary = summarizeInput(input) || String(stateObj.title ?? "");
