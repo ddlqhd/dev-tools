@@ -25,6 +25,9 @@ type TaskStore = {
   waitingHumanCount: number;
   includeArchived: boolean;
   reload: () => Promise<void>;
+  reloadRepos: () => Promise<void>;
+  /** Insert or replace one repo and invalidate in-flight list snapshots. */
+  applyRepo: (repo: Repo) => void;
   /** Local echo so the board updates before the hub round-trip lands. */
   applyTask: (task: Task) => void;
   removeTask: (id: string) => void;
@@ -53,9 +56,31 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
   includeArchivedRef.current = includeArchived;
   const { status: hubStatus, generation } = useHubSync();
   const notified = useRef(new Set<string>());
+  /** Monotonic ids so a newer list/upsert wins, and a failed fetch does not discard an older success. */
+  const reposFetch = useRef({ next: 0, applied: 0 });
+
+  const beginReposWrite = () => ++reposFetch.current.next;
+
+  const commitRepos = (id: number, write: () => void) => {
+    if (id < reposFetch.current.applied) return;
+    reposFetch.current.applied = id;
+    write();
+  };
+
+  const reloadRepos = useCallback(async () => {
+    const id = beginReposWrite();
+    const r = await api.listRepos();
+    commitRepos(id, () => setRepos(r.repos));
+  }, []);
+
+  const applyRepo = useCallback((repo: Repo) => {
+    const id = beginReposWrite();
+    commitRepos(id, () => setRepos((prev) => upsertRepo(prev, repo)));
+  }, []);
 
   const reload = useCallback(async () => {
     const fetchedAt = new Date().toISOString();
+    const repoId = beginReposWrite();
     try {
       const [t, r] = await Promise.all([
         api.listTasks({ archived: includeArchived }),
@@ -65,7 +90,7 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
         const merged = mergeTaskSnapshot(prev, t.tasks, fetchedAt);
         return includeArchived ? merged : merged.filter((task) => !task.archived_at);
       });
-      setRepos(r.repos);
+      commitRepos(repoId, () => setRepos(r.repos));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -129,6 +154,8 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
       waitingHumanCount,
       includeArchived,
       reload,
+      reloadRepos,
+      applyRepo,
       applyTask,
       removeTask,
     }),
@@ -141,12 +168,21 @@ export function TaskStoreProvider({ children }: { children: ReactNode }) {
       waitingHumanCount,
       includeArchived,
       reload,
+      reloadRepos,
+      applyRepo,
       applyTask,
       removeTask,
     ],
   );
 
   return <TaskStoreContext.Provider value={value}>{children}</TaskStoreContext.Provider>;
+}
+
+function upsertRepo(prev: Repo[], repo: Repo): Repo[] {
+  const idx = prev.findIndex((r) => r.id === repo.id);
+  const next = idx < 0 ? [...prev, repo] : prev.map((item, i) => (i === idx ? repo : item));
+  next.sort((a, b) => a.full_name.localeCompare(b.full_name));
+  return next;
 }
 
 function notifyWaitingHuman(task: Task, seen: Set<string>) {

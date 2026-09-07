@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageState, StatusBanner } from "../components/PageState";
 import { api, type Repo } from "../api";
+import { useTaskStore } from "../task-store";
 
 type EditForm = {
   clonePath: string;
@@ -10,8 +11,8 @@ type EditForm = {
   githubToken: string;
 };
 
-export function ReposPage({ onReposChange }: { onReposChange?: (repos: Repo[]) => void } = {}) {
-  const [repos, setRepos] = useState<Repo[]>([]);
+export function ReposPage() {
+  const { repos, applyRepo, reloadRepos } = useTaskStore();
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -24,28 +25,23 @@ export function ReposPage({ onReposChange }: { onReposChange?: (repos: Repo[]) =
     defaultBranch: "main",
   });
 
-  const reload = () =>
-    api.listRepos().then((r) => {
-      setRepos(r.repos);
-      onReposChange?.(r.repos);
-    });
-
   useEffect(() => {
-    void reload().catch((e: Error) => setError(e.message));
-  }, []);
+    void reloadRepos().catch((e: Error) => setError(e.message));
+  }, [reloadRepos]);
 
   const create = async () => {
     setError(null);
     try {
-      await api.createRepo({
+      const { repo } = await api.createRepo({
         fullName: form.fullName,
         clonePath: form.clonePath || undefined,
         triggerLabel: form.triggerLabel,
         maxConcurrency: form.maxConcurrency,
         defaultBranch: form.defaultBranch,
       });
+      applyRepo(repo);
       setForm((f) => ({ ...f, fullName: "", clonePath: "" }));
-      await reload();
+      await reloadRepos().catch(() => undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -74,15 +70,16 @@ export function ReposPage({ onReposChange }: { onReposChange?: (repos: Repo[]) =
     setError(null);
     try {
       const token = editForm.githubToken.trim();
-      await api.updateRepo(editingId, {
+      const { repo } = await api.updateRepo(editingId, {
         clonePath: editForm.clonePath,
         triggerLabel: editForm.triggerLabel,
         maxConcurrency: editForm.maxConcurrency,
         defaultBranch: editForm.defaultBranch,
         ...(token ? { githubToken: token } : {}),
       });
+      applyRepo(repo);
       cancelEdit();
-      await reload();
+      await reloadRepos().catch(() => undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, NavLink, useParams, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/PageHeader";
 import { PageState, StatusBanner } from "../components/PageState";
-import { api, type CodeloopConfig, type Repo } from "../api";
+import { api, type CodeloopConfig } from "../api";
+import { useTaskStore } from "../task-store";
 import { ReposPage } from "./ReposPage";
 
 const STAGE_ALIASES = [
@@ -84,7 +85,7 @@ function sectionHref(id: SettingsSectionId, repoId: string) {
 export function SettingsPage() {
   const { section } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [repos, setRepos] = useState<Repo[]>([]);
+  const { repos, loaded: reposLoaded } = useTaskStore();
   const [repoId, setRepoId] = useState(searchParams.get("repo") ?? "");
   const [config, setConfig] = useState<CodeloopConfig | null>(null);
   const [pipelines, setPipelines] = useState<string[]>([]);
@@ -104,19 +105,22 @@ export function SettingsPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const [r, meta] = await Promise.all([api.listRepos(), api.getConfigMeta()]);
-        setRepos(r.repos);
+        const meta = await api.getConfigMeta();
         setEngineOptions(meta.engines);
         if (meta.engines[0]) setBulkType(meta.engines[0].id);
-        setRepoId((currentId) => {
-          if (currentId && r.repos.some((repo) => repo.id === currentId)) return currentId;
-          return r.repos.length === 1 ? r.repos[0].id : "";
-        });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!reposLoaded && repos.length === 0) return;
+    setRepoId((currentId) => {
+      if (currentId && repos.some((repo) => repo.id === currentId)) return currentId;
+      return repos.length === 1 ? repos[0].id : "";
+    });
+  }, [repos, reposLoaded]);
 
   const urlRepo = searchParams.get("repo") ?? "";
 
@@ -285,17 +289,7 @@ export function SettingsPage() {
           }
         />
 
-        {current.id === "repos" && (
-          <ReposPage
-            onReposChange={(next) => {
-              setRepos(next);
-              setRepoId((currentId) => {
-                if (currentId && next.some((repo) => repo.id === currentId)) return currentId;
-                return next.length === 1 ? next[0].id : currentId;
-              });
-            }}
-          />
-        )}
+        {current.id === "repos" && <ReposPage />}
 
         {isConfigSection && repos.length === 0 && (
           <div className="Box">
