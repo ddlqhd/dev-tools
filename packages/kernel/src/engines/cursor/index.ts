@@ -2,7 +2,6 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import { access } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
-import which from "../which.js";
 import type { EngineChunk, EngineTurnResult, EngineType } from "@devtools/shared";
 import {
   EngineError,
@@ -12,25 +11,44 @@ import {
   type SessionOptions,
 } from "../adapter.js";
 import { createCursorStreamState, parseCursorStreamLine } from "./stream.js";
+import {
+  invokedAsEnv,
+  looksLikeGrokCliOutput,
+  resolveCursorBinary,
+  spawnTarget,
+} from "./resolve-bin.js";
 
-/** Cursor Agent CLI binary. Configurable via CODELOOP_CURSOR_BIN. */
-export const CURSOR_BIN = process.env.CODELOOP_CURSOR_BIN ?? "agent";
+/** Cursor Agent CLI name. Configurable via CODELOOP_CURSOR_BIN. */
+export const CURSOR_BIN = process.env.CODELOOP_CURSOR_BIN ?? "cursor-agent";
 
 export class CursorAdapter implements EngineAdapter {
   readonly type: EngineType = "cursor";
 
   async probe(): Promise<EngineInfo> {
-    const binary = await which(CURSOR_BIN);
-    if (!binary) {
+    const resolved = await resolveCursorBinary();
+    if (!resolved.binary) {
       return {
         type: "cursor",
         binary: CURSOR_BIN,
         loggedIn: false,
-        details: `Command '${CURSOR_BIN}' not found in PATH`,
+        details: resolved.reason ?? `Command '${CURSOR_BIN}' not found in PATH`,
       };
     }
 
+    const binary = resolved.binary;
     const version = await runCapture(binary, ["--version"]);
+    const combined = `${version.stdout}\n${version.stderr}`;
+    if (looksLikeGrokCliOutput(combined)) {
+      return {
+        type: "cursor",
+        binary,
+        loggedIn: false,
+        details:
+          `Resolved binary is Grok CLI (${binary}), not Cursor Agent. ` +
+          "Set CODELOOP_CURSOR_BIN to cursor-agent.",
+      };
+    }
+
     const status = await runCapture(binary, ["status"]);
     const loggedIn = /login successful|logged in/i.test(status.stdout + status.stderr);
 
@@ -71,7 +89,11 @@ class CursorSession implements EngineSession {
       throw new EngineError("Cursor agent aborted before start");
     }
 
-    const binary = (await which(CURSOR_BIN)) ?? CURSOR_BIN;
+    const resolved = await resolveCursorBinary();
+    if (!resolved.binary) {
+      throw new EngineError(resolved.reason ?? "Cursor agent CLI not found");
+    }
+    const binary = resolved.binary;
     await assertDir(this.opts.cwd);
 
     const args = buildArgs({
@@ -92,10 +114,9 @@ class CursorSession implements EngineSession {
     const nodeTimeout = this.opts.nodeTimeoutMs ?? 30 * 60_000;
 
     return new Promise<EngineTurnResult>((resolve, reject) => {
-      const child = spawn(binary, args, {
+      const child = spawnCursor(binary, args, {
         cwd: this.opts.cwd,
-        env: { ...process.env, ...this.opts.env },
-        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, ...invokedAsEnv(binary), ...this.opts.env },
       });
       this.child = child;
 
@@ -164,7 +185,7 @@ class CursorSession implements EngineSession {
       });
 
       child.on("error", (err) => {
-        fail(new EngineError(`Failed to spawn ${CURSOR_BIN}: ${err.message}`, err));
+        fail(new EngineError(`Failed to spawn ${binary}: ${err.message}`, err));
       });
 
       child.on("close", (code) => {
@@ -234,9 +255,9 @@ function buildArgs(opts: {
   sandbox: "enabled" | "disabled";
   resume?: string;
 }): string[] {
-  // Prompt as positional arg; avoid stdin complexity for M1.
+  // `--print` (not `-p`): Grok's CLI also ships as `agent` and `-p` is `--single <PROMPT>`.
   const args: string[] = [
-    "-p",
+    "--print",
     "--output-format",
     "stream-json",
     "--stream-partial-output",
@@ -276,6 +297,19 @@ async function assertDir(path: string): Promise<void> {
   await access(path, fsConstants.R_OK | fsConstants.X_OK);
 }
 
+function spawnCursor(
+  binary: string,
+  args: string[],
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+) {
+  const target = spawnTarget(binary);
+  return spawn(target.command, [...target.prefix, ...args], {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdio: ["ignore", "pipe", "pipe"] as const,
+  });
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -285,7 +319,7 @@ async function runCapture(
   args: string[],
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve) => {
-    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawnCursor(binary, args);
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     child.stdout.on("data", (b: Buffer) => out.push(b));

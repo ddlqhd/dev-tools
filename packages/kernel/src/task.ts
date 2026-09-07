@@ -153,7 +153,7 @@ export async function doctor(repoPath?: string): Promise<{
   checks.push({
     name: "cursor-login",
     ok: info.loggedIn,
-    detail: info.details ?? (info.loggedIn ? "logged in" : "not logged in — run: agent login"),
+    detail: info.details ?? (info.loggedIn ? "logged in" : "not logged in — run: cursor-agent login"),
   });
 
   const opencodeAdapter = getEngineAdapter("opencode");

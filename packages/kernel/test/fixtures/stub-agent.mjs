@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stub Cursor `agent` CLI for integration tests.
-// Driven by argv (mirrors `agent -p --output-format stream-json ...`) and env:
+// Driven by argv (mirrors `cursor-agent --print --output-format stream-json ...`) and env:
 //   CODELOOP_STUB_LOG    — jsonl of every invocation {args, prompt, cwd}
 //   CODELOOP_STUB_STATE  — path to JSON {reviewTurn, reviewAlwaysFail, verifyFailOnce}
 // Behaviors by prompt keyword (mirrors prompts/index.ts):
