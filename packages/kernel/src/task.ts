@@ -1,8 +1,14 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { InterventionDecision, InterventionRequest, KernelEvent } from "@devtools/shared";
-import { getMissingEngineConfigs, loadConfig, ensureCodeloopDir } from "./config.js";
+import {
+  getMissingEngineConfigs,
+  readConfig,
+  isCodeloopInitialized,
+  CodeloopNotInitializedError,
+} from "./config.js";
 import { KernelStore } from "./store/index.js";
 import { getEngineAdapter, resolveEngineType } from "./engines/registry.js";
 import type { EngineInfo } from "./engines/adapter.js";
@@ -168,79 +174,100 @@ export async function doctor(repoPath?: string): Promise<{
   });
 
   if (repoPath) {
-    try {
-      const config = await loadConfig(repoPath);
-      const engineSummary = Object.entries(config.engines)
-        .map(([name, conf]) => `${name}=${conf.type}${conf.model ? `/${conf.model}` : ""}`)
-        .join(", ");
+    if (!isCodeloopInitialized(repoPath)) {
       checks.push({
         name: "config",
-        ok: true,
-        detail: `pipeline=${config.pipeline}`,
+        ok: false,
+        detail: `not initialized — run: codeloop init --repo ${repoPath}`,
       });
-      checks.push({
-        name: "engines",
-        ok: Object.keys(config.engines).length > 0,
-        detail: engineSummary || "(none)",
-      });
+    } else {
       try {
-        const pipeline = applyPipelineOverrides(
-          await loadPipeline(config.pipeline, repoPath),
-          config.pipelineOverrides,
-        );
-        const missingEngines = getMissingEngineConfigs(pipeline.nodes, config.engines);
+        const config = await readConfig(repoPath);
+        const engineSummary = Object.entries(config.engines)
+          .map(([name, conf]) => `${name}=${conf.type}${conf.model ? `/${conf.model}` : ""}`)
+          .join(", ");
         checks.push({
-          name: "pipeline-engines",
-          ok: missingEngines.length === 0,
-          detail:
-            missingEngines.length === 0
-              ? `all engine configs present for ${pipeline.name}`
-              : `missing: ${missingEngines.join(", ")}`,
+          name: "config",
+          ok: true,
+          detail: `pipeline=${config.pipeline}`,
         });
-      } catch (err) {
         checks.push({
-          name: "pipeline-engines",
-          ok: false,
-          detail: err instanceof Error ? err.message : String(err),
+          name: "engines",
+          ok: Object.keys(config.engines).length > 0,
+          detail: engineSummary || "(none)",
         });
-      }
-      const engineProbes: Record<string, EngineInfo> = {};
-      for (const [name, conf] of Object.entries(config.engines)) {
         try {
-          const engineType = resolveEngineType(conf.type);
-          const probed =
-            engineProbes[engineType] ??
-            (engineProbes[engineType] = await getEngineAdapter(engineType).probe());
+          const pipeline = applyPipelineOverrides(
+            await loadPipeline(config.pipeline, repoPath),
+            config.pipelineOverrides,
+          );
+          const missingEngines = getMissingEngineConfigs(pipeline.nodes, config.engines);
           checks.push({
-            name: `engine:${name}`,
-            ok: Boolean(probed.version),
-            detail: conf.model
-              ? `${engineType} model=${conf.model} (${probed.binary} ${probed.version ?? "not found"})`
-              : `${engineType} (${probed.binary} ${probed.version ?? "not found"})`,
+            name: "pipeline-engines",
+            ok: missingEngines.length === 0,
+            detail:
+              missingEngines.length === 0
+                ? `all engine configs present for ${pipeline.name}`
+                : `missing: ${missingEngines.join(", ")}`,
           });
         } catch (err) {
           checks.push({
-            name: `engine:${name}`,
+            name: "pipeline-engines",
             ok: false,
             detail: err instanceof Error ? err.message : String(err),
           });
         }
+        const engineProbes: Record<string, EngineInfo> = {};
+        for (const [name, conf] of Object.entries(config.engines)) {
+          try {
+            const engineType = resolveEngineType(conf.type);
+            const probed =
+              engineProbes[engineType] ??
+              (engineProbes[engineType] = await getEngineAdapter(engineType).probe());
+            checks.push({
+              name: `engine:${name}`,
+              ok: Boolean(probed.version),
+              detail: conf.model
+                ? `${engineType} model=${conf.model} (${probed.binary} ${probed.version ?? "not found"})`
+                : `${engineType} (${probed.binary} ${probed.version ?? "not found"})`,
+            });
+          } catch (err) {
+            checks.push({
+              name: `engine:${name}`,
+              ok: false,
+              detail: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      } catch (err) {
+        checks.push({
+          name: "config",
+          ok: false,
+          detail: err instanceof Error ? err.message : String(err),
+        });
       }
-      await ensureCodeloopDir(repoPath);
-    } catch (err) {
-      checks.push({
-        name: "config",
-        ok: false,
-        detail: err instanceof Error ? err.message : String(err),
-      });
     }
   }
 
   return { ok: checks.every((c) => c.ok), checks };
 }
 
+function requireInitialized(repoPath: string): void {
+  if (!isCodeloopInitialized(repoPath)) {
+    throw new CodeloopNotInitializedError(repoPath);
+  }
+}
+
+function openStoreReadOnly(repoPath: string) {
+  requireInitialized(repoPath);
+  const root = join(repoPath, ".codeloop");
+  if (!existsSync(join(root, "kernel.db"))) return undefined;
+  return new KernelStore(root, { readOnly: true });
+}
+
 export function listTasks(repoPath: string) {
-  const store = new KernelStore(join(repoPath, ".codeloop"));
+  const store = openStoreReadOnly(repoPath);
+  if (!store) return [];
   try {
     return store.listTasks();
   } finally {
@@ -249,7 +276,8 @@ export function listTasks(repoPath: string) {
 }
 
 export function getTask(repoPath: string, taskId: string) {
-  const store = new KernelStore(join(repoPath, ".codeloop"));
+  const store = openStoreReadOnly(repoPath);
+  if (!store) return undefined;
   try {
     return store.getTask(taskId);
   } finally {

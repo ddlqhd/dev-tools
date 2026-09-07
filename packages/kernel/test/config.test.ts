@@ -1,9 +1,20 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, stat, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, ensureCodeloopDir, getMissingEngineConfigs, writeConfig, backfillEnginePrompts } from "../src/config.js";
+import {
+  loadConfig,
+  readConfig,
+  ensureCodeloopDir,
+  initCodeloop,
+  isCodeloopInitialized,
+  CodeloopNotInitializedError,
+  getMissingEngineConfigs,
+  writeConfig,
+  backfillEnginePrompts,
+} from "../src/config.js";
 import { DEFAULT_ENGINE_ALIASES, DEFAULT_PROMPTS } from "../src/prompts/index.js";
 import type { NodeSpec } from "@devtools/shared";
 
@@ -153,4 +164,67 @@ test("getMissingEngineConfigs: no missing when all present", () => {
   };
   const missing = getMissingEngineConfigs(nodes, { coder: { type: "cursor" } });
   assert.deepEqual(missing, []);
+});
+
+test("initCodeloop: reports created then exists", async () => {
+  const fresh = await mkdtemp(join(tmpdir(), "codeloop-init-"));
+  try {
+    assert.equal(isCodeloopInitialized(fresh), false);
+    const first = await initCodeloop(fresh);
+    assert.equal(isCodeloopInitialized(fresh), true);
+    assert.ok(first.actions.some((a) => a.path === ".codeloop" && a.status === "created"));
+    assert.ok(first.actions.some((a) => a.path === ".codeloop/config.yaml" && a.status === "created"));
+    const second = await initCodeloop(fresh);
+    assert.equal(
+      second.actions.find((a) => a.path === ".codeloop/config.yaml")?.status,
+      "exists",
+    );
+    assert.ok(second.actions.every((a) => a.status === "exists"));
+  } finally {
+    await rm(fresh, { recursive: true, force: true });
+  }
+});
+
+test("initCodeloop: creates .gitignore in a git repo that lacks one", async () => {
+  const fresh = await mkdtemp(join(tmpdir(), "codeloop-init-gi-create-"));
+  try {
+    await mkdir(join(fresh, ".git"));
+    const first = await initCodeloop(fresh);
+    assert.equal(first.actions.find((a) => a.path === ".gitignore")?.status, "created");
+    const gi = await readFile(join(fresh, ".gitignore"), "utf8");
+    assert.equal(gi, ".codeloop/\n");
+    const second = await initCodeloop(fresh);
+    assert.equal(second.actions.find((a) => a.path === ".gitignore")?.status, "exists");
+  } finally {
+    await rm(fresh, { recursive: true, force: true });
+  }
+});
+
+test("initCodeloop: updates .gitignore when present", async () => {
+  const fresh = await mkdtemp(join(tmpdir(), "codeloop-init-gi-"));
+  try {
+    await writeFile(join(fresh, ".gitignore"), "node_modules/\n", "utf8");
+    const first = await initCodeloop(fresh);
+    assert.equal(first.actions.find((a) => a.path === ".gitignore")?.status, "updated");
+    const gi = await readFile(join(fresh, ".gitignore"), "utf8");
+    assert.match(gi, /\.codeloop\//);
+    const second = await initCodeloop(fresh);
+    assert.equal(second.actions.find((a) => a.path === ".gitignore")?.status, "exists");
+  } finally {
+    await rm(fresh, { recursive: true, force: true });
+  }
+});
+
+test("readConfig: throws when not initialized", async () => {
+  const fresh = await mkdtemp(join(tmpdir(), "codeloop-read-"));
+  try {
+    await assert.rejects(() => readConfig(fresh), (err: unknown) => {
+      assert.ok(err instanceof CodeloopNotInitializedError);
+      assert.match(err.message, /codeloop init/);
+      return true;
+    });
+    assert.equal(existsSync(join(fresh, ".codeloop")), false);
+  } finally {
+    await rm(fresh, { recursive: true, force: true });
+  }
 });

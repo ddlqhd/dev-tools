@@ -14,6 +14,8 @@ import {
   readKernelLock,
   KernelRuntime,
   syncSkills,
+  initCodeloop,
+  CodeloopNotInitializedError,
 } from "@devtools/kernel";
 import type { TaskRunResult } from "@devtools/kernel";
 import type {
@@ -45,6 +47,7 @@ program.addHelpText(
   "after",
   `
 Examples:
+  codeloop init                                 create .codeloop/ in this repo
   codeloop doctor                               check engine CLI install/login and config
   codeloop run "fix the flaky test" --no-gate   run a task unattended (auto-approve gates)
   codeloop run -f requirements.md --pipeline quick-fix
@@ -54,16 +57,57 @@ Examples:
   codeloop serve                                start the kernel daemon (console UI)
 
 Standard workflow:
-  1. codeloop doctor
-  2. codeloop run "<requirement>" --repo <path>
-  3. codeloop watch <taskId>  (at a gate: review output, then approve or reject)
-  4. codeloop show <taskId>   (full handover: stages, artifacts with paths, git, usage)
+  1. codeloop init     (optional; creates .codeloop/ — run/serve also create it)
+  2. codeloop doctor
+  3. codeloop run "<requirement>" --repo <path>
+  4. codeloop watch <taskId>  (at a gate: review output, then approve or reject)
+  5. codeloop show <taskId>   (full handover: stages, artifacts with paths, git, usage)
 `,
 );
 
 program
+  .command("init")
+  .description("Create .codeloop/ layout and default config.yaml")
+  .option("--repo <path>", "repo path", process.cwd())
+  .option("--with-skills", "also copy bundled skills into .cursor/.claude/.opencode")
+  .addHelpText(
+    "after",
+    `
+Idempotent. Does not probe engines (use doctor for that).
+In a git repo, creates or updates .gitignore so .codeloop/ is ignored.
+run and serve still create .codeloop/ on first use if you skip init.
+
+Examples:
+  codeloop init
+  codeloop init --repo /path/to/repo
+  codeloop init --with-skills`,
+  )
+  .action(async (opts: { repo: string; withSkills?: boolean }) => {
+    const repo = resolve(opts.repo);
+    const result = await initCodeloop(repo);
+    for (const action of result.actions) {
+      console.log(`${action.status.padEnd(8)}  ${action.path}`);
+    }
+    if (opts.withSkills) {
+      const sourceDir = findSkillsDir();
+      if (!sourceDir) {
+        console.error(
+          "Bundled skills not found (package built without the skills/ directory).",
+        );
+        console.error(`layout created at ${repo}; rerun: codeloop sync-skills --repo ${repo}`);
+        process.exit(1);
+      }
+      const results = syncSkills({ sourceDir, projectDir: repo });
+      for (const r of results) {
+        console.log(`synced   ${join(repo, r.target)} (${r.skills.join(", ")})`);
+      }
+    }
+    console.log(`initialized ${repo}`);
+  });
+
+program
   .command("doctor")
-  .description("Check engine CLI install/login and local config")
+  .description("Check engine CLI install/login and local config (read-only)")
   .option("--repo <path>", "repo path", process.cwd())
   .action(async (opts: { repo: string }) => {
     const result = await doctor(resolve(opts.repo));
@@ -326,8 +370,8 @@ Examples:
       const repo = resolve(opts.repo);
       const lock = await readKernelLock(repo);
       if (!lock) {
+        const runtime = await KernelRuntime.openExisting(repo);
         console.error("No kernel daemon (codeloop serve). Showing historical events from disk…");
-        const runtime = await KernelRuntime.open(repo);
         const plain = new PlainRenderer();
         try {
           const handle = await runtime.attachTask(taskId);
@@ -383,7 +427,7 @@ for (const action of ["pause", "resume", "abort"] as const) {
         console.log(JSON.stringify(result));
         return;
       }
-      const runtime = await KernelRuntime.open(repo);
+      const runtime = await KernelRuntime.openExisting(repo);
       try {
         const handle = await runtime.attachTask(taskId);
         if (action === "pause") await handle.pause();
@@ -413,7 +457,7 @@ program
       console.log(JSON.stringify(await apiPost(lock, `/tasks/${taskId}/instructions`, { text: opts.message })));
       return;
     }
-    const runtime = await KernelRuntime.open(repo);
+    const runtime = await KernelRuntime.openExisting(repo);
     try {
       const handle = await runtime.attachTask(taskId);
       await handle.inject(opts.message);
@@ -469,7 +513,7 @@ async function resolveDecision(
       };
       reqId = snap.pendingIntervention?.requestId;
     } else {
-      const runtime = await KernelRuntime.open(repo);
+      const runtime = await KernelRuntime.openExisting(repo, { readOnly: true });
       try {
         const snap = await runtime.getSnapshot(taskId);
         reqId = snap.pendingIntervention?.requestId;
@@ -490,7 +534,7 @@ async function resolveDecision(
     return;
   }
 
-  const runtime = await KernelRuntime.open(repo);
+  const runtime = await KernelRuntime.openExisting(repo);
   try {
     const handle = await runtime.attachTask(taskId);
     // No daemon: apply decision and await resume so the short-lived CLI can finish the gate.
@@ -1002,6 +1046,13 @@ function statusFromTerminalEvent(event: KernelEvent): TaskUiStatus | undefined {
 }
 
 program.parseAsync(process.argv).catch((err: unknown) => {
-  console.error(err instanceof Error ? err.stack ?? err.message : err);
+  if (
+    err instanceof CodeloopNotInitializedError ||
+    (err instanceof Error && err.name === "CodeloopNotInitializedError")
+  ) {
+    console.error(err instanceof Error ? err.message : String(err));
+  } else {
+    console.error(err instanceof Error ? err.stack ?? err.message : err);
+  }
   process.exit(1);
 });

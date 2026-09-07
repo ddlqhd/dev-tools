@@ -146,13 +146,13 @@ test("purgePlatformTask: children before parent; hub emits each deletion", async
   }
 });
 
-test("purgePlatformTask: healthy instance uses HTTP delete, not KernelRuntime.open", async () => {
+test("purgePlatformTask: healthy instance uses HTTP delete, not KernelRuntime.openExisting", async () => {
   const tmp = await mkdtemp(join(tmpdir(), "codeloop-del-http-"));
   const clone = join(tmp, "repo");
   await mkdir(clone, { recursive: true });
   const store = new PlatformStore(tmp);
-  const openMock = mock.method(KernelRuntime, "open", async () => {
-    throw new Error("open should not be called when healthy");
+  const openMock = mock.method(KernelRuntime, "openExisting", async () => {
+    throw new Error("openExisting should not be called when healthy");
   });
   let deleteCalled = false;
   const fetchMock = mock.method(globalThis, "fetch", async (url: string | URL | Request) => {
@@ -228,7 +228,7 @@ test("purgePlatformTask: unhealthy instance opens KernelRuntime", async () => {
   const store = new PlatformStore(tmp);
   let deletedKid: string | null = null;
   let closed = false;
-  const openMock = mock.method(KernelRuntime, "open", async (repoPath: string) => {
+  const openMock = mock.method(KernelRuntime, "openExisting", async (repoPath: string) => {
     assert.equal(repoPath, clone);
     return {
       async deleteTask(taskId: string) {

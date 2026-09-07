@@ -57,7 +57,7 @@ async function deleteViaRuntime(
   kernelTaskId: string,
   log: PurgePlatformTaskDeps["log"],
 ): Promise<void> {
-  const rt = await KernelRuntime.open(clonePath);
+  const rt = await KernelRuntime.openExisting(clonePath);
   try {
     await rt.deleteTask(kernelTaskId);
   } catch (err) {

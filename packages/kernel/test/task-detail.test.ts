@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { EventLog } from "../src/store/index.js";
 import { KernelRuntime } from "../src/runtime/kernel-runtime.js";
 import { loadTaskDetail } from "../src/server/task-detail.js";
+import { initCodeloop } from "../src/config.js";
 import { cleanupRepo, freshRepo } from "./helpers.js";
 
 const PIPELINE_YAML = `version: 1
@@ -83,7 +85,9 @@ test("loadTaskDetail: offline fold includes paths, artifact path, and stages", a
 test("loadTaskDetail: missing task throws", async () => {
   const repo = await freshRepo();
   try {
+    await initCodeloop(repo);
     await assert.rejects(() => loadTaskDetail(repo, "missing1"), /not found/i);
+    assert.equal(existsSync(join(repo, ".codeloop", "kernel.db")), false);
   } finally {
     await cleanupRepo(repo);
   }

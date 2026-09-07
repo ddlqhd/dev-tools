@@ -3,12 +3,16 @@ export { loadTaskDetail, readTaskDetail, buildTaskDetail } from "./server/task-d
 export type { CreateAndRunOptions, TaskRunResult } from "./task.js";
 export {
   loadConfig,
+  readConfig,
   writeConfig,
   ensureCodeloopDir,
+  initCodeloop,
+  isCodeloopInitialized,
+  CodeloopNotInitializedError,
   DEFAULT_CONFIG_YAML,
   CodeloopConfigSchema,
 } from "./config.js";
-export type { CodeloopConfig } from "./config.js";
+export type { CodeloopConfig, InitAction, InitResult, InitActionStatus } from "./config.js";
 export { loadPipeline, listBuiltinPipelines, parsePipelineYaml } from "./pipeline/load.js";
 export { CursorAdapter, CURSOR_BIN } from "./engines/cursor/index.js";
 export { OpenCodeAdapter, OPENCODE_BIN } from "./engines/opencode/index.js";
@@ -16,6 +20,7 @@ export { getEngineAdapter, resolveEngineType } from "./engines/registry.js";
 export { PipelineInterpreter, parseFlowCursor } from "./loop/interpreter.js";
 export type { FlowCursor, ResumeState } from "./loop/interpreter.js";
 export { KernelStore, EventLog, ArtifactStore } from "./store/index.js";
+export type { KernelStoreOptions } from "./store/index.js";
 export type { EngineAdapter, EngineSession, EngineInfo } from "./engines/adapter.js";
 export { SuspendedError } from "./engines/adapter.js";
 export { KernelRuntime, TaskHandle } from "./runtime/kernel-runtime.js";

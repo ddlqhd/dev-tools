@@ -72,7 +72,7 @@ export async function loadTaskDetail(
   repoPath: string,
   taskId: string,
 ): Promise<{ detail: TaskDetail; events: KernelEvent[] }> {
-  const runtime = await KernelRuntime.open(repoPath);
+  const runtime = await KernelRuntime.openExisting(repoPath, { readOnly: true });
   try {
     return await readTaskDetail(runtime, taskId);
   } finally {
