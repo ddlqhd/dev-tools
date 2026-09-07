@@ -120,6 +120,16 @@ test("handleTaskFailure requeues with backoff until the budget is spent", async 
     );
     assert.equal(store.getTask("t3")!.status, "failed");
 
+    // Duplicate after requeue must not look like neverStarted and terminal-fail.
+    store.insertTask(taskRow("t-dup", { kernel_task_id: "kd" }));
+    sync.handleTaskFailure("t-dup", "first fail");
+    assert.equal(store.getTask("t-dup")!.status, "queued");
+    assert.equal(store.getTask("t-dup")!.retry_count, 1);
+    sync.handleTaskFailure("t-dup", "same fail again");
+    t = store.getTask("t-dup")!;
+    assert.equal(t.status, "queued", "already requeued — do not mark failed");
+    assert.equal(t.retry_count, 1, "retry budget must not be consumed twice");
+
     // Never started: spawn / createTask must not sit in the queue
     store.insertTask(taskRow("t4", { status: "preparing", branch: null, kernel_task_id: null }));
     sync.handleTaskFailure("t4", "codeloop serve failed to spawn: spawn codeloop ENOENT");
@@ -128,8 +138,8 @@ test("handleTaskFailure requeues with backoff until the budget is spent", async 
     assert.match(t.error!, /spawn codeloop ENOENT/);
     assert.equal(t.retry_count ?? 0, 0);
   } finally {
-    await rm(tmp, { recursive: true, force: true });
     store.close();
+    await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
   }
 });
 
@@ -157,8 +167,8 @@ test("waiting_human does not consume repo concurrency slots; due retries are deq
     const candidates = store.dequeueCandidates(10);
     assert.ok(candidates.some((t) => t.id === "due"), "past-due retry must be picked up");
   } finally {
-    await rm(tmp, { recursive: true, force: true });
     store.close();
+    await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
   }
 });
 
@@ -201,7 +211,177 @@ test("releaseInstance stays busy while another task is still bound", async () =>
     sync.releaseInstance("inst-1");
     assert.equal(store.getInstance("inst-1")!.status, "idle");
   } finally {
-    await rm(tmp, { recursive: true, force: true });
     store.close();
+    await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+  }
+});
+
+function seedRepo(store: PlatformStore): void {
+  const now = new Date().toISOString();
+  store.insertRepo({
+    id: "r1",
+    platform: "github",
+    full_name: "o/r",
+    clone_path: "/tmp/x",
+    trigger_label: "ai-dev",
+    max_concurrency: 1,
+    github_token: null,
+    default_branch: "main",
+    created_at: now,
+    updated_at: now,
+  });
+}
+
+function insertFailedLog(store: PlatformStore, taskId: string, ts: string): void {
+  store.insertEvent({
+    task_id: taskId,
+    seq: 3,
+    ts,
+    type: "node.started",
+    payload: JSON.stringify({ nodeId: "codeReview" }),
+  });
+  store.insertEvent({
+    task_id: taskId,
+    seq: 4,
+    ts,
+    type: "node.retrying",
+    payload: JSON.stringify({ nodeId: "codeReview", attempt: 1 }),
+  });
+  store.insertEvent({
+    task_id: taskId,
+    seq: 5,
+    ts,
+    type: "task.failed",
+    payload: JSON.stringify({ error: "first attempt" }),
+  });
+}
+
+test("clearTaskEvents lets a new kernel attempt reuse seq 1..N", async () => {
+  tmp = await mkdtemp(join(tmpdir(), "codeloop-seq-"));
+  const store = new PlatformStore(tmp);
+  try {
+    seedRepo(store);
+    store.insertTask(taskRow("t1", { status: "running", kernel_task_id: "k1" }));
+    insertFailedLog(store, "t1", "2026-09-07T13:56:26.000Z");
+    assert.equal(store.lastEventSeq("t1"), 5);
+    assert.equal(
+      store.insertEvent({
+        task_id: "t1",
+        seq: 5,
+        ts: "2026-09-07T13:57:32.000Z",
+        type: "task.failed",
+        payload: JSON.stringify({ error: "second attempt" }),
+      }),
+      false,
+      "same seq from a new kernel must collide before clear",
+    );
+
+    store.clearTaskEvents("t1");
+    assert.equal(store.lastEventSeq("t1"), 0);
+    assert.equal(
+      store.insertEvent({
+        task_id: "t1",
+        seq: 5,
+        ts: "2026-09-07T13:57:32.000Z",
+        type: "task.failed",
+        payload: JSON.stringify({ error: "second attempt" }),
+      }),
+      true,
+    );
+    assert.equal(store.lastEventSeq("t1"), 5);
+  } finally {
+    store.close();
+    await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+  }
+});
+
+test("applyKernelSnapshot recovers a running task whose task.failed was dropped", async () => {
+  tmp = await mkdtemp(join(tmpdir(), "codeloop-reconcile-"));
+  const store = new PlatformStore(tmp);
+  const sync = makeSync(store, makeConfig());
+  try {
+    seedRepo(store);
+    store.insertTask(
+      taskRow("stuck", {
+        status: "running",
+        kernel_task_id: "k2",
+        instance_id: "inst-1",
+        retry_count: 1,
+        next_retry_at: "2026-09-07T13:57:26.000Z",
+        current_node: "codeReview",
+      }),
+    );
+    insertFailedLog(store, "stuck", "2026-09-07T13:56:26.000Z");
+
+    const changed = await sync.applyKernelSnapshot("stuck", {
+      status: "failed",
+      error: "Cursor agent exited with code 2",
+    });
+    assert.equal(changed, true);
+    const t = store.getTask("stuck")!;
+    assert.equal(t.status, "queued", "retry budget remains — requeue, do not stay running");
+    assert.equal(t.kernel_task_id, null);
+    assert.equal(t.instance_id, null);
+    assert.equal(t.retry_count, 2);
+    assert.match(t.error ?? "", /Cursor agent exited/);
+
+    assert.equal(
+      await sync.applyKernelSnapshot("stuck", { status: "failed", error: "again" }),
+      false,
+      "already queued — snapshot must not double-apply",
+    );
+    sync.handleTaskFailure("stuck", "ingest raced with snapshot");
+    assert.equal(store.getTask("stuck")!.status, "queued");
+    assert.equal(store.getTask("stuck")!.retry_count, 2);
+  } finally {
+    store.close();
+    await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
+  }
+});
+
+test("applyKernelSnapshot maps aborted / completed / exhausted-retry", async () => {
+  tmp = await mkdtemp(join(tmpdir(), "codeloop-snap-"));
+  const store = new PlatformStore(tmp);
+  const sync = makeSync(
+    store,
+    makeConfig({ retry: { maxRetries: 0, baseDelayMs: 60_000 } }),
+  );
+  try {
+    seedRepo(store);
+    store.insertTask(taskRow("abort", { status: "running", kernel_task_id: "ka" }));
+    assert.equal(await sync.applyKernelSnapshot("abort", { status: "aborted" }), true);
+    assert.equal(store.getTask("abort")!.status, "cancelled");
+
+    store.insertTask(taskRow("done", { status: "running", kernel_task_id: "kd" }));
+    assert.equal(await sync.applyKernelSnapshot("done", { status: "completed" }), true);
+    assert.equal(store.getTask("done")!.status, "done");
+
+    store.insertTask(
+      taskRow("term", { status: "running", kernel_task_id: "kf", retry_count: 0 }),
+    );
+    assert.equal(
+      await sync.applyKernelSnapshot("term", { status: "failed", error: "boom" }),
+      true,
+    );
+    assert.equal(store.getTask("term")!.status, "failed");
+    assert.equal(store.getTask("term")!.error, "boom");
+
+    store.insertTask(taskRow("pause", { status: "running", kernel_task_id: "ks" }));
+    assert.equal(await sync.applyKernelSnapshot("pause", { status: "suspended" }), true);
+    assert.equal(store.getTask("pause")!.status, "paused");
+    assert.equal(await sync.applyKernelSnapshot("pause", { status: "suspended" }), false);
+
+    store.insertTask(taskRow("gate", { status: "running", kernel_task_id: "kg" }));
+    assert.equal(
+      await sync.applyKernelSnapshot("gate", {
+        status: "suspended",
+        pendingIntervention: { requestId: "r1" },
+      }),
+      true,
+    );
+    assert.equal(store.getTask("gate")!.status, "waiting_human");
+  } finally {
+    store.close();
+    await rm(tmp, { recursive: true, force: true }).catch(() => undefined);
   }
 });

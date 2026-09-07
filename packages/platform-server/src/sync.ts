@@ -34,11 +34,14 @@ export class EventSync {
 
     ws.on("open", () => {
       for (const task of this.store.listTasks()) {
-        if (
-          task.instance_id === instanceId &&
-          ["preparing", "running", "waiting_human", "paused", "delivering"].includes(task.status)
-        ) {
+        if (task.instance_id !== instanceId) continue;
+        // Snapshot reconcile would re-deliver a completed kernel; only replay events.
+        if (task.status === "delivering") {
           void this.catchUp(instanceId, task.id);
+          continue;
+        }
+        if (["preparing", "running", "waiting_human", "paused"].includes(task.status)) {
+          void this.reconcileBoundTask(task.id);
         }
       }
     });
@@ -76,6 +79,12 @@ export class EventSync {
   handleTaskFailure(taskId: string, message: string): void {
     const task = this.store.getTask(taskId);
     if (!task) return;
+    // Snapshot reconcile and WS ingest can both see the same kernel failure.
+    // A second pass after requeue looks like neverStarted (kernel_task_id
+    // already cleared) and would terminal-fail a task that still has budget.
+    if (["queued", "failed", "cancelled", "done", "merged"].includes(task.status)) {
+      return;
+    }
     // Never started: spawn / createTask errors are not transient.
     const neverStarted = task.kernel_task_id == null;
     // Only clearly-permanent errors skip the queue; transient lookalikes are
@@ -98,6 +107,7 @@ export class EventSync {
         next_retry_at: nextRetryAt,
         instance_id: null,
         kernel_task_id: null,
+        current_node: null,
         // ci-fix must keep running against the PR branch; fresh tasks get a
         // new branch from the kernel (the old one may still be checked out).
         branch: task.source === "ci-fix" ? task.branch : null,
@@ -345,7 +355,7 @@ export class EventSync {
     }
   }
 
-  /** Catch-up historical events after reconnect. */
+  /** Catch-up historical events after reconnect or a fresh kernel bind. */
   async catchUp(instanceId: string, taskId: string): Promise<void> {
     const task = this.store.getTask(taskId);
     const inst = this.store.getInstance(instanceId);
@@ -355,6 +365,103 @@ export class EventSync {
     const events = await client.events(task.kernel_task_id, after);
     for (const e of events) {
       await this.ingest(instanceId, e);
+    }
+  }
+
+  /**
+   * Align platform status when the kernel is already terminal but the
+   * event stream missed it (seq collision after retry, or bind race).
+   */
+  async applyKernelSnapshot(
+    taskId: string,
+    kernel: {
+      status: string;
+      error?: string | null;
+      pendingIntervention?: unknown;
+    },
+  ): Promise<boolean> {
+    const task = this.store.getTask(taskId);
+    if (!task) return false;
+    if (!["preparing", "running", "waiting_human", "paused"].includes(task.status)) {
+      return false;
+    }
+
+    if (kernel.status === "failed") {
+      this.handleTaskFailure(task.id, kernel.error ?? "failed");
+      this.releaseInstance(task.instance_id);
+      this.hub({ type: "task.updated", payload: this.store.getTask(task.id) });
+      return true;
+    }
+    if (kernel.status === "completed") {
+      await this.deliver(task.id);
+      return true;
+    }
+    if (kernel.status === "aborted") {
+      this.store.updateTask(task.id, { status: "cancelled" });
+      this.releaseInstance(task.instance_id);
+      this.hub({ type: "task.updated", payload: this.store.getTask(task.id) });
+      return true;
+    }
+    if (kernel.status === "suspended") {
+      const next = kernel.pendingIntervention ? "waiting_human" : "paused";
+      if (task.status === next) return false;
+      this.store.updateTask(task.id, { status: next });
+      this.hub({ type: "task.updated", payload: this.store.getTask(task.id) });
+      return true;
+    }
+    return false;
+  }
+
+  /** Replay missed events, then apply a kernel snapshot if still active. */
+  async reconcileBoundTask(taskId: string): Promise<void> {
+    const task = this.store.getTask(taskId);
+    if (!task?.instance_id || !task.kernel_task_id) return;
+    if (!["preparing", "running", "waiting_human", "paused"].includes(task.status)) {
+      return;
+    }
+    const inst = this.store.getInstance(task.instance_id);
+    if (!inst) return;
+
+    try {
+      await this.catchUp(inst.id, task.id);
+    } catch {
+      // instance may be gone; snapshot below can still fail the task
+    }
+
+    const latest = this.store.getTask(taskId);
+    if (!latest?.instance_id || !latest.kernel_task_id) return;
+    if (!["preparing", "running", "waiting_human", "paused"].includes(latest.status)) {
+      return;
+    }
+    const live = this.store.getInstance(latest.instance_id);
+    if (!live) return;
+
+    try {
+      const snap = (await new KernelClient(live.endpoint, live.token).getTask(
+        latest.kernel_task_id,
+      )) as {
+        task?: { status?: string; error?: string | null };
+        pendingIntervention?: unknown;
+      };
+      const status = snap.task?.status;
+      if (!status) return;
+      await this.applyKernelSnapshot(taskId, {
+        status,
+        error: snap.task?.error ?? null,
+        pendingIntervention: snap.pendingIntervention,
+      });
+    } catch {
+      // kernel unreachable
+    }
+  }
+
+  async reconcileBoundTasks(): Promise<void> {
+    for (const task of this.store.listTasks()) {
+      if (!task.instance_id || !task.kernel_task_id) continue;
+      if (!["preparing", "running", "waiting_human", "paused"].includes(task.status)) {
+        continue;
+      }
+      await this.reconcileBoundTask(task.id);
     }
   }
 }

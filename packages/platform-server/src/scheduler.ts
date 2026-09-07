@@ -169,6 +169,7 @@ export class Scheduler {
       for (const task of candidates) {
         await this.dispatch(task);
       }
+      await this.sync.reconcileBoundTasks();
     } finally {
       this.ticking = false;
     }
@@ -223,14 +224,27 @@ export class Scheduler {
         configOverrides: { autoApproveGates: false },
       });
 
+      // New kernel seqs restart at 1; drop the previous attempt's log so
+      // catch-up / WS ingest cannot collide and skip task.failed.
+      this.store.clearTaskEvents(task.id);
       this.store.updateTask(task.id, {
         status: "running",
         instance_id: instance.id,
         kernel_task_id: created.taskId,
         branch: created.branch,
         error: null,
+        current_node: null,
+        next_retry_at: null,
       });
       this.hub({ type: "task.updated", payload: this.store.getTask(task.id) });
+      try {
+        await this.sync.catchUp(instance.id, task.id);
+      } catch (err) {
+        console.error(
+          `[catchUp] ${task.id}:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // Auto-retry with backoff when the budget allows; terminal fail otherwise.

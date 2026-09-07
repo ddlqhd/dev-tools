@@ -644,6 +644,11 @@ export class PlatformStore {
     return row.m ?? 0;
   }
 
+  /** Drop the stored kernel log so a new attempt can reuse seqs from 1. */
+  clearTaskEvents(taskId: string): void {
+    this.db.prepare(`DELETE FROM task_events WHERE task_id = ?`).run(taskId);
+  }
+
   insertIntervention(row: {
     id: string;
     task_id: string;
