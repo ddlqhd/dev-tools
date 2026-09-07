@@ -59,6 +59,8 @@ test("m1-minimal: full pipeline completes inplace with a single commit", { timeo
 test("default-codeloop: full loop with gate auto-approve and artifacts", { timeout: 60_000 }, async () => {
   const repo = await freshRepo();
   const state = await makeStubState({});
+  await rm(STUB_LOG, { force: true });
+  process.env.CODELOOP_STUB_LOG = STUB_LOG;
   try {
     const seen: KernelEvent[] = [];
     const result = await createAndRunTask({
@@ -77,6 +79,13 @@ test("default-codeloop: full loop with gate auto-approve and artifacts", { timeo
     assert.ok(reviews.length >= 2);
     assert.equal((reviews[0]!.payload as { passed: boolean }).passed, false);
     assert.equal((reviews[reviews.length - 1]!.payload as { passed: boolean }).passed, true);
+
+    // planReview failure is fed into the next planner prompt
+    const calls = await readStubLog(STUB_LOG);
+    const planCalls = calls.filter((c) => /planning/.test(c.prompt));
+    assert.ok(planCalls.length >= 2, `expected ≥2 plan turns, got ${planCalls.length}`);
+    assert.match(planCalls[1]!.prompt, /Review comments to address/);
+    assert.match(planCalls[1]!.prompt, /stub review finding/);
 
     // artifacts on disk
     const plan = await import("node:fs/promises").then((fs) =>
@@ -98,6 +107,7 @@ test("default-codeloop: full loop with gate auto-approve and artifacts", { timeo
   } finally {
     await cleanupRepo(repo);
     await rm(state, { force: true });
+    delete process.env.CODELOOP_STUB_LOG;
   }
 });
 
@@ -121,12 +131,13 @@ test("gate reject loops back into planLoop and completes after approval", { time
     assert.equal(result.status, "completed", result.error);
     assert.equal(gateCalls, 2, "gate should be hit twice (reject → re-loop → approve)");
 
-    // reject comments are injected into the next plan turn as instructions
+    // reject comments are on the planComments artifact in the next plan turn
     const calls = await readStubLog(STUB_LOG);
     const planCalls = calls.filter((c) => /planning/.test(c.prompt));
     assert.ok(planCalls.length >= 2, `expected ≥2 plan turns, got ${planCalls.length}`);
     const postRejectPlan = planCalls.at(-1)!.prompt;
-    assert.match(postRejectPlan, /Gate rejected with comments/);
+    assert.match(postRejectPlan, /Gate rejected — revise the plan/);
+    assert.match(postRejectPlan, /Review comments to address/);
     assert.match(postRejectPlan, /plan is wrong/);
     // the previous plan is fed back so the model can revise, not restart
     assert.match(postRejectPlan, /## Previous plan/);

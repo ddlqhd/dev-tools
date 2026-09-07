@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  artifactExt,
+  defaultArtifactInputs,
+  isPlanAgent,
   normalizeFlow,
   resolveNodeEngineKey,
   NodeSpecSchema,
@@ -125,4 +128,48 @@ test("NodeSpecSchema: defaults applied for absent fields", () => {
   const parsed = NodeSpecSchema.parse({ type: "gate" });
   assert.equal(parsed.type, "gate");
   assert.equal(parsed.onFail, undefined);
+});
+
+test("isPlanAgent: promptTemplate plan", () => {
+  assert.equal(isPlanAgent({ type: "agent", promptTemplate: "plan" }), true);
+});
+
+test("isPlanAgent: outputs include planDoc", () => {
+  assert.equal(isPlanAgent({ type: "agent", outputs: ["planDoc"] }), true);
+});
+
+test("isPlanAgent: code agent is false", () => {
+  assert.equal(
+    isPlanAgent({ type: "agent", engine: "coder", promptTemplate: "code" }),
+    false,
+  );
+});
+
+test("isPlanAgent: review node is false", () => {
+  assert.equal(isPlanAgent({ type: "review", engine: "planReviewer" }), false);
+});
+
+test("artifactExt: comments and reports are json", () => {
+  assert.equal(artifactExt("planComments"), "json");
+  assert.equal(artifactExt("reviewComments"), "json");
+  assert.equal(artifactExt("verifyReport"), "json");
+  assert.equal(artifactExt("planDoc"), "md");
+});
+
+test("defaultArtifactInputs: plan / fix / other", () => {
+  assert.deepEqual(
+    defaultArtifactInputs({ type: "agent", promptTemplate: "plan" }),
+    ["planDoc", "planComments"],
+  );
+  assert.deepEqual(
+    defaultArtifactInputs({ type: "agent", promptTemplate: "fix" }),
+    ["reviewComments"],
+  );
+  assert.deepEqual(defaultArtifactInputs({ type: "agent", promptTemplate: "code" }), [
+    "planDoc",
+  ]);
+  assert.deepEqual(defaultArtifactInputs({ type: "review" }), ["planDoc"]);
+  assert.deepEqual(defaultArtifactInputs({ type: "verify" }), ["planDoc"]);
+  assert.deepEqual(defaultArtifactInputs({ type: "commit" }), ["planDoc"]);
+  assert.deepEqual(defaultArtifactInputs({ type: "gate" }), []);
 });

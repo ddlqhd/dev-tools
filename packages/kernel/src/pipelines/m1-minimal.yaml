@@ -8,6 +8,7 @@ nodes:
     engine: planner
     readonly: true
     promptTemplate: plan
+    inputs: [planDoc, planComments]
     outputs: [planDoc]
   code:
     type: agent
@@ -17,6 +18,7 @@ nodes:
   commit:
     type: commit
     engine: committer
+    inputs: [planDoc]
     messageStyle: conventional
 
 flow:

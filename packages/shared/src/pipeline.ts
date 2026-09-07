@@ -51,6 +51,29 @@ export function resolveNodeEngineKey(spec: NodeSpec): string | undefined {
   return spec.engine ?? DEFAULT_ENGINE_ALIAS[spec.type] ?? "coder";
 }
 
+/** File extension used on disk for a named artifact key. */
+export function artifactExt(key: string): "md" | "json" {
+  if (/Comments$|Report$|Json$/i.test(key)) return "json";
+  return "md";
+}
+
+/** True when this agent turn produces a plan artifact in native plan mode. */
+export function isPlanAgent(spec: NodeSpec): boolean {
+  if (spec.type !== "agent") return false;
+  return spec.promptTemplate === "plan" || (spec.outputs ?? []).includes("planDoc");
+}
+
+/**
+ * Artifact keys a runner should read when the node omits `inputs`.
+ * Missing files are treated as null — first loop iteration has no previous plan.
+ */
+export function defaultArtifactInputs(spec: NodeSpec): string[] {
+  if (spec.type === "gate" || spec.type === "command") return [];
+  if (isPlanAgent(spec)) return ["planDoc", "planComments"];
+  if (spec.promptTemplate === "fix") return ["reviewComments"];
+  return ["planDoc"];
+}
+
 export const LoopBlockSchema = z.object({
   loop: z.object({
     id: z.string(),

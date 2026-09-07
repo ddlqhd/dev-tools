@@ -126,6 +126,64 @@ test("tool_use write verify artifact + plan markdown capture", () => {
   assert.equal(s2.capturedPlanMarkdown, "# Goal\n\nplan body");
 });
 
+test("tool_use plan: extracts markdown from plan/overview fields", () => {
+  const overview = `# Goal
+Implement feature X in the existing module.
+
+# Approach
+1. Locate the entrypoint.
+2. Wire the change.`;
+  const { chunks, state } = parse(
+    event({
+      type: "tool_use",
+      part: {
+        type: "tool",
+        tool: "plan",
+        state: { input: { name: "Plan X", overview } },
+      },
+    }),
+  );
+  assert.equal(chunks[0]?.kind, "toolUse");
+  if (chunks[0]?.kind === "toolUse") {
+    assert.equal(chunks[0].tool, "Plan");
+  }
+  assert.ok(state.capturedPlanMarkdown?.includes("Goal"));
+});
+
+test("tool_use create_plan: tool name matching /plan/i captures content", () => {
+  const plan = `# Goal
+Ship it.
+
+# Approach
+Edit one file and add a test for the new path.`;
+  const { state } = parse(
+    event({
+      type: "tool_use",
+      part: {
+        type: "tool",
+        tool: "create_plan",
+        state: { input: { plan } },
+      },
+    }),
+  );
+  assert.ok(state.capturedPlanMarkdown?.includes("Ship it"));
+});
+
+test("tool_use non-plan tool with overview/markdown does not capture a plan", () => {
+  const overview = "A".repeat(50);
+  const { state } = parse(
+    event({
+      type: "tool_use",
+      part: {
+        type: "tool",
+        tool: "webfetch",
+        state: { input: { url: "https://example.com", overview, markdown: overview } },
+      },
+    }),
+  );
+  assert.equal(state.capturedPlanMarkdown, undefined);
+});
+
 test("tool_use edit: emits edit fileChange", () => {
   const { chunks, state } = parse(
     event({

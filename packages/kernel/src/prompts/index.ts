@@ -1,6 +1,8 @@
 export interface PromptContext {
   requirement: string;
   planDoc?: string;
+  /** JSON (or text) of plan-review comments to address on the next plan turn. */
+  planComments?: string;
   reviewComments?: string;
   instructions: string[];
   artifactHints?: string;
@@ -32,6 +34,7 @@ export const DEFAULT_PROMPTS: Record<DefaultEngineAlias, string> = {
 {{requirement}}
 {{instructions}}
 {{previousPlan}}
+{{planComments}}
 
 ## Workflow
 
@@ -47,7 +50,7 @@ Write the final plan. It must be decision-complete: no "maybe", "TBD", or unreso
 ## Hard rules
 1. You are in READ-ONLY plan mode. Explore only; do NOT implement, do NOT modify or create any file, do NOT run mutating commands.
 2. Deliver the finished plan with the plan tool (CreatePlan). If that tool is unavailable, put the complete plan Markdown in your final message instead.
-3. When a previous plan is provided, revise it: keep what is sound and explicitly change what is not. Address every review comment listed in the instructions above.
+3. When a previous plan is provided, revise it: keep what is sound and explicitly change what is not. Address every review comment in the "Review comments to address" section.
 
 ## Plan contents (Markdown)
 Include the following headings, concise but specific:
@@ -254,7 +257,7 @@ export function renderPrompt(alias: string, ctx: PromptContext, body?: string): 
   if (!template) {
     throw new Error(`Unknown prompt template: ${alias}`);
   }
-  const vars = varsFrom(alias, ctx);
+  const vars = varsFrom(alias, ctx, template);
   return template.replace(PLACEHOLDER, (match, name: string) =>
     Object.prototype.hasOwnProperty.call(vars, name) ? vars[name]! : match,
   );
@@ -264,12 +267,26 @@ function isDefaultAlias(alias: string): alias is DefaultEngineAlias {
   return alias in DEFAULT_PROMPTS;
 }
 
-function varsFrom(alias: string, ctx: PromptContext): Record<string, string> {
+function varsFrom(
+  alias: string,
+  ctx: PromptContext,
+  template: string,
+): Record<string, string> {
+  const commentsBlock = planCommentsBlock(ctx.planComments);
+  const hasPlanCommentsSlot = template.includes("{{planComments}}");
+  let instructions = instructionsBlock(ctx.instructions);
+  // Frozen config.yaml prompts copied at init have {{instructions}} but not
+  // {{planComments}}; fold the comments into instructions so reject/review
+  // notes still reach the next plan turn.
+  if (!hasPlanCommentsSlot && commentsBlock) {
+    instructions = instructions ? `${instructions}${commentsBlock}` : `\n${commentsBlock}`;
+  }
   return {
     requirement: ctx.requirement,
     planDoc: ctx.planDoc ?? planDocFallback(alias),
     reviewComments: ctx.reviewComments ?? "[]",
-    instructions: instructionsBlock(ctx.instructions),
+    planComments: hasPlanCommentsSlot ? commentsBlock : "",
+    instructions,
     previousPlan: ctx.planDoc
       ? `\n## Previous plan (revise it rather than start from scratch)\n${ctx.planDoc}`
       : "",
@@ -283,6 +300,12 @@ function planDocFallback(alias: string): string {
   if (alias === "coder") return "(no separate plan artifact — infer from requirement)";
   if (alias === "planReviewer") return "";
   return "(none)";
+}
+
+function planCommentsBlock(raw?: string): string {
+  const trimmed = raw?.trim();
+  if (!trimmed) return "";
+  return `\n## Review comments to address\n${trimmed}`;
 }
 
 function instructionsBlock(instructions: string[]): string {

@@ -195,6 +195,7 @@ engines:
       {{requirement}}
       {{instructions}}
       {{previousPlan}}
+      {{planComments}}
   planReviewer:
     type: cursor
     model: composer-2.5
@@ -246,6 +247,7 @@ git:
 | `{{requirement}}` | 任务需求原文 | （必有） |
 | `{{planDoc}}` | 已有方案 Markdown | `coder`：`(no separate plan artifact — infer from requirement)`；`planReviewer`：空串；其余：`(none)` |
 | `{{reviewComments}}` | 未关闭评审意见 JSON | `[]` |
+| `{{planComments}}` | 整段 `## Review comments to address` + 方案评审 / gate 驳回意见 JSON | 无意见时为空（该节不出现）。模板若未写此占位符，意见会折进 `{{instructions}}` |
 | `{{instructions}}` | 整段 `## Human instructions (must follow)` + `inject` / `resume -m` 指令 | 无注入时为空（该节不出现） |
 | `{{previousPlan}}` | 整段 `## Previous plan (revise it…)` + 上一版方案 | 无上一版时为空 |
 | `{{branch}}` | 任务分支名 | `(current)` |

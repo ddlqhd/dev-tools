@@ -49,6 +49,7 @@ test("loadPipeline: default-codeloop wiring is well-formed", async () => {
   );
   assert.equal((verifyStep as { onFail?: { goto: string } })?.onFail?.goto, "reviewLoop");
   assert.equal(p.nodes.plan?.engine, "planner");
+  assert.deepEqual(p.nodes.plan?.inputs, ["planDoc", "planComments"]);
   assert.equal(p.nodes.code?.engine, "coder");
 });
 

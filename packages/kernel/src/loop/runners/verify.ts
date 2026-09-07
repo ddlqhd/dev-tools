@@ -8,6 +8,7 @@ import {
   type VerifyResult,
 } from "@devtools/shared";
 import { renderPrompt } from "../../prompts/index.js";
+import { loadPromptArtifacts } from "../artifact-inputs.js";
 import type { NodeContext, NodeResult, NodeRunner } from "../node.js";
 
 const VERIFY_FILE = ".codeloop-verify.json";
@@ -24,12 +25,12 @@ export class VerifyNodeRunner implements NodeRunner {
   async run(spec: NodeSpec, ctx: NodeContext): Promise<NodeResult> {
     if (!ctx.engine) throw new Error("verify node requires an engine session");
 
-    const planDoc = await ctx.artifacts.readText("planDoc");
+    const artifacts = await loadPromptArtifacts(spec, ctx.artifacts);
     const engineKey = resolveNodeEngineKey(spec);
     if (!engineKey) throw new Error("verify node requires an engine alias");
     const prompt = renderPrompt(engineKey, {
       requirement: ctx.task.requirement,
-      planDoc: planDoc ?? undefined,
+      planDoc: artifacts.planDoc,
       instructions: ctx.instructions,
     }, ctx.config.engines[engineKey]?.prompt);
 

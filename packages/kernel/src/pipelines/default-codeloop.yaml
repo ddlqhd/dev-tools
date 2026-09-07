@@ -7,6 +7,7 @@ nodes:
     engine: planner
     readonly: true
     promptTemplate: plan
+    inputs: [planDoc, planComments]
     outputs: [planDoc]
   planReview:
     type: review
@@ -25,6 +26,7 @@ nodes:
   codeReview:
     type: review
     engine: codeReviewer
+    inputs: [planDoc]
     severityGate: major
     outputs: [reviewComments]
   fixReview:
@@ -35,6 +37,7 @@ nodes:
   verify:
     type: verify
     engine: verifier
+    inputs: [planDoc]
     outputs: [verifyReport]
     # Also accepted on the node; flow-step form below is the canonical wiring.
     onFail:
@@ -43,6 +46,7 @@ nodes:
   commit:
     type: commit
     engine: committer
+    inputs: [planDoc]
     messageStyle: conventional
 
 flow:
