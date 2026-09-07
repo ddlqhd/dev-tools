@@ -21,15 +21,19 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+const winShell = process.platform === "win32";
+
 function run(cmd, args, opts = {}) {
   console.log(`$ ${cmd} ${args.join(" ")}`);
   const r = spawnSync(cmd, args, {
     cwd: root,
     stdio: "inherit",
-    shell: false,
+    // Windows cannot spawn pnpm/npm shims (.cmd) without a shell
+    shell: winShell,
     ...opts,
   });
   if (r.status !== 0) {
+    if (r.error) console.error(r.error);
     process.exit(r.status ?? 1);
   }
 }
@@ -186,7 +190,7 @@ console.log("packing…");
 const pack = spawnSync(
   "npm",
   ["pack", "--pack-destination", artifacts],
-  { cwd: staging, encoding: "utf8" },
+  { cwd: staging, encoding: "utf8", shell: winShell },
 );
 if (pack.status !== 0) {
   console.error(pack.stdout);
@@ -204,6 +208,7 @@ console.log(`packed → ${tgzPath}`);
 
 // 5. Validate contents
 const listing = execFileSync("tar", ["-tzf", tgzPath], { encoding: "utf8" });
+const entries = listing.split(/\r?\n/).filter(Boolean);
 const required = [
   "package/dist/cli/index.js",
   "package/dist/platform/cli.js",
@@ -212,21 +217,18 @@ const required = [
   "package/node_modules/@devtools/kernel/dist/index.js",
   "package/node_modules/@devtools/shared/dist/index.js",
 ];
-const pipelineYaml = listing
-  .split("\n")
-  .filter((l) => l.includes("node_modules/@devtools/kernel/dist/pipelines/") && l.endsWith(".yaml"));
+const pipelineYaml = entries.filter(
+  (l) => l.includes("node_modules/@devtools/kernel/dist/pipelines/") && l.endsWith(".yaml"),
+);
 if (pipelineYaml.length === 0) {
   console.error("tarball missing kernel pipeline yaml files");
   process.exit(1);
 }
 for (const need of required) {
-  if (!listing.split("\n").includes(need) && !listing.includes(need)) {
-    // tar may or may not have trailing slash variants; use includes
-    const found = listing.split("\n").some((l) => l === need || l === `${need}/`);
-    if (!found) {
-      console.error(`tarball missing required path: ${need}`);
-      process.exit(1);
-    }
+  const found = entries.some((l) => l === need || l === `${need}/`);
+  if (!found) {
+    console.error(`tarball missing required path: ${need}`);
+    process.exit(1);
   }
 }
 console.log(`validated tarball (${pipelineYaml.length} pipeline yaml files)`);
