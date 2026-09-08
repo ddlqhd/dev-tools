@@ -13,7 +13,8 @@ export {
   CodeloopConfigSchema,
 } from "./config.js";
 export type { CodeloopConfig, InitAction, InitResult, InitActionStatus } from "./config.js";
-export { loadPipeline, listBuiltinPipelines, parsePipelineYaml } from "./pipeline/load.js";
+export { loadPipeline, listBuiltinPipelines, parsePipelineYaml, ensureBuiltinPipelinesCopied } from "./pipeline/load.js";
+export type { BuiltinPipelineCopyResult } from "./pipeline/load.js";
 export { CursorAdapter, CURSOR_BIN } from "./engines/cursor/index.js";
 export { OpenCodeAdapter, OPENCODE_BIN } from "./engines/opencode/index.js";
 export { getEngineAdapter, resolveEngineType } from "./engines/registry.js";

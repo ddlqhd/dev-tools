@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile, readdir, copyFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,16 +131,26 @@ export async function snapshotPipeline(
   await writeFile(join(taskDir, "pipeline.snapshot.yaml"), loaded.rawYaml, "utf8");
 }
 
-export async function ensureBuiltinPipelinesCopied(destDir: string): Promise<void> {
+export interface BuiltinPipelineCopyResult {
+  name: string;
+  created: boolean;
+}
+
+export async function ensureBuiltinPipelinesCopied(
+  destDir: string,
+): Promise<BuiltinPipelineCopyResult[]> {
   await mkdir(destDir, { recursive: true });
   const names = await listBuiltinPipelines();
+  const results: BuiltinPipelineCopyResult[] = [];
   for (const name of names) {
     const src = join(BUILTIN_DIR, `${name}.yaml`);
     const dest = join(destDir, `${name}.yaml`);
-    try {
-      await copyFile(src, dest);
-    } catch {
-      // ignore if already exists or copy fails
+    if (existsSync(dest)) {
+      results.push({ name, created: false });
+      continue;
     }
+    await copyFile(src, dest);
+    results.push({ name, created: true });
   }
+  return results;
 }

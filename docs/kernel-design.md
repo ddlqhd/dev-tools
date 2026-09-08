@@ -384,7 +384,8 @@ commit 由引擎执行 git 操作（读 diff、自拟 message、`reset --soft` +
 ```
 .codeloop/
 ├── config.yaml
-├── pipelines/                 # 自定义 pipeline 模板(内置模板随内核发布)
+├── pipelines/                 # init 复制的内置模板 + 自定义 pipeline（可本地改）
+│   ├── default-codeloop.yaml
 │   └── my-loop.yaml
 ├── kernel.db                  # SQLite: tasks / checkpoints / interventions / usage
 ├── worktrees/<taskId>/        # 任务工作区
@@ -468,7 +469,7 @@ CLI 本地使用时不起服务，直接进程内调用内核库；`serve` 模�
 ## 8. CLI 设计
 
 ```
-codeloop init                  # 可选: 在仓库创建 .codeloop/ 与默认配置; git 仓库会写入 .gitignore
+codeloop init                  # 可选: 在仓库创建 .codeloop/、默认配置与内置 pipeline 模板
 codeloop run "<需求>"          # 创建并运行任务(默认 default-codeloop), 进入交互式进度界面
 codeloop run -f req.md --pipeline quick-fix --no-gate
 codeloop pipelines             # 列出内置与自定义 pipeline 模板(含静态校验结果)

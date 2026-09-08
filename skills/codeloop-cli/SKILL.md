@@ -28,10 +28,12 @@ fix loop → verify → commit) over a git repository, using an engine CLI
   local config (read-only; it does not create `.codeloop/`). If the repo is
   not initialized, the `config` check fails and tells you to run `codeloop init`.
 - **Repo layout**: `codeloop init [--repo <path>]` creates `.codeloop/`
-  (config, pipelines, worktrees, tasks). In a git repo it creates `.gitignore`
-  containing `.codeloop/` if missing, or appends that entry to an existing one.
-  Idempotent. Optional `--with-skills` also runs `sync-skills` (if the skills
-  bundle is missing, layout is still created and the command exits 1).
+  (config, pipelines, worktrees, tasks). It copies bundled pipeline templates
+  into `.codeloop/pipelines/` (existing files are not overwritten). In a git
+  repo it adds `/.codeloop/` to `.git/info/exclude` so the state directory is
+  ignored without touching the working-tree `.gitignore`. Idempotent. Optional
+  `--with-skills` also runs `sync-skills` (if the skills bundle is missing,
+  layout is still created and the command exits 1).
   Inspect/control commands (`doctor`, `list`, `show`, `watch`, `pause`,
   `resume`, `abort`, `inject`, `approve`, `reject`) do not create `.codeloop/`.
   `run` and `serve` still create the layout on first use if you skip `init`.
@@ -71,11 +73,13 @@ argument — **capture it from the `run` output and reuse it**.
 codeloop init [--repo <path>] [--with-skills]
 ```
 
-Create `.codeloop/` layout and default `config.yaml`. Idempotent: already-present
-paths are reported as `exists`; missing prompts in an existing config are
-reported as `updated`. In a git repo, creates `.gitignore` (or appends) so
-`.codeloop/` is ignored. Does not probe engines. `run` / `serve` still
-lazy-create this layout. Other commands do not.
+Create `.codeloop/` layout, default `config.yaml`, and bundled pipeline
+templates under `.codeloop/pipelines/`. Idempotent: already-present paths are
+reported as `exists`; missing prompts in an existing config are reported as
+`updated`; existing pipeline files are not overwritten. In a git repo, adds
+`/.codeloop/` to `.git/info/exclude` so `.codeloop/` is ignored without
+touching the working-tree `.gitignore`. Does not probe engines. `run` / `serve`
+still lazy-create this layout. Other commands do not.
 
 ### doctor
 

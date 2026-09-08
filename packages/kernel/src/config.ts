@@ -6,6 +6,7 @@ import { z } from "zod";
 import { resolveNodeEngineKey, type NodeSpec } from "@devtools/shared";
 import { DEFAULT_ENGINE_ALIASES, DEFAULT_PROMPTS } from "./prompts/index.js";
 import { excludeCodeloopState } from "./git/worktree.js";
+import { ensureBuiltinPipelinesCopied } from "./pipeline/load.js";
 
 export const CodeloopConfigSchema = z.object({
   version: z.literal(1),
@@ -202,6 +203,14 @@ export async function initCodeloop(repoPath: string): Promise<InitResult> {
     } else {
       actions.push({ path: ".codeloop/config.yaml", status: "exists" });
     }
+  }
+
+  const pipelineCopies = await ensureBuiltinPipelinesCopied(join(root, "pipelines"));
+  for (const { name, created } of pipelineCopies) {
+    actions.push({
+      path: `.codeloop/pipelines/${name}.yaml`,
+      status: created ? "created" : "exists",
+    });
   }
 
   const excludeStatus = await excludeCodeloopState(repoPath);

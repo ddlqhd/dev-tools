@@ -17,6 +17,7 @@ import {
   backfillEnginePrompts,
 } from "../src/config.js";
 import { DEFAULT_ENGINE_ALIASES, DEFAULT_PROMPTS } from "../src/prompts/index.js";
+import { listBuiltinPipelines } from "../src/pipeline/load.js";
 import type { NodeSpec } from "@devtools/shared";
 
 let repo: string;
@@ -35,6 +36,9 @@ test("ensureCodeloopDir: creates layout + default config", async () => {
   for (const dir of ["pipelines", "worktrees", "tasks"]) {
     const info = await stat(join(codeloopRoot, dir));
     assert.ok(info.isDirectory(), dir);
+  }
+  for (const name of await listBuiltinPipelines()) {
+    assert.ok(existsSync(join(codeloopRoot, "pipelines", `${name}.yaml`)), name);
   }
   const configRaw = await readFile(join(codeloopRoot, "config.yaml"), "utf8");
   assert.match(configRaw, /^version: 1/m);
@@ -176,12 +180,38 @@ test("initCodeloop: reports created then exists", async () => {
     assert.equal(isCodeloopInitialized(fresh), true);
     assert.ok(first.actions.some((a) => a.path === ".codeloop" && a.status === "created"));
     assert.ok(first.actions.some((a) => a.path === ".codeloop/config.yaml" && a.status === "created"));
+    for (const name of await listBuiltinPipelines()) {
+      assert.equal(
+        first.actions.find((a) => a.path === `.codeloop/pipelines/${name}.yaml`)?.status,
+        "created",
+        name,
+      );
+    }
     const second = await initCodeloop(fresh);
     assert.equal(
       second.actions.find((a) => a.path === ".codeloop/config.yaml")?.status,
       "exists",
     );
     assert.ok(second.actions.every((a) => a.status === "exists"));
+  } finally {
+    await rm(fresh, { recursive: true, force: true });
+  }
+});
+
+test("initCodeloop: does not overwrite customized pipeline files", async () => {
+  const fresh = await mkdtemp(join(tmpdir(), "codeloop-init-pipeline-"));
+  try {
+    await initCodeloop(fresh);
+    const customPath = join(fresh, ".codeloop", "pipelines", "default-codeloop.yaml");
+    await writeFile(customPath, "version: 1\npipeline: default-codeloop\nnodes:\n  code:\n    type: agent\nflow:\n  - code\n", "utf8");
+    const second = await initCodeloop(fresh);
+    assert.equal(
+      second.actions.find((a) => a.path === ".codeloop/pipelines/default-codeloop.yaml")?.status,
+      "exists",
+    );
+    const raw = await readFile(customPath, "utf8");
+    assert.match(raw, /type: agent/);
+    assert.doesNotMatch(raw, /planLoop/);
   } finally {
     await rm(fresh, { recursive: true, force: true });
   }

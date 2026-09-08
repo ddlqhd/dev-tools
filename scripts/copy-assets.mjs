@@ -15,6 +15,16 @@ if (pkg === "kernel") {
   mkdirSync(dest, { recursive: true });
   cpSync(src, dest, { recursive: true });
   console.log("copied pipelines →", dest);
+} else if (pkg === "kernel-test") {
+  const src = join(root, "packages/kernel/src/pipelines");
+  const dest = join(root, "packages/kernel/dist-test/src/pipelines");
+  if (!existsSync(src)) {
+    console.error("pipelines source missing:", src);
+    process.exit(1);
+  }
+  mkdirSync(dest, { recursive: true });
+  cpSync(src, dest, { recursive: true });
+  console.log("copied pipelines →", dest);
 } else if (pkg === "platform-server") {
   const src = join(root, "packages/platform-web/dist");
   const dest = join(root, "packages/platform-server/dist/web");

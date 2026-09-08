@@ -1,9 +1,9 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadPipeline, listBuiltinPipelines, parsePipelineYaml } from "@devtools/kernel";
+import { loadPipeline, listBuiltinPipelines, parsePipelineYaml, ensureBuiltinPipelinesCopied } from "@devtools/kernel";
 
 let repo: string;
 
@@ -51,6 +51,22 @@ test("loadPipeline: default-codeloop wiring is well-formed", async () => {
   assert.equal(p.nodes.plan?.engine, "planner");
   assert.deepEqual(p.nodes.plan?.inputs, ["planDoc", "planComments"]);
   assert.equal(p.nodes.code?.engine, "coder");
+});
+
+test("ensureBuiltinPipelinesCopied: skips existing files", async () => {
+  const dir = join(repo, ".codeloop", "pipelines");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, "default-codeloop.yaml"),
+    "version: 1\npipeline: default-codeloop\nnodes:\n  code:\n    type: agent\nflow:\n  - code\n",
+    "utf8",
+  );
+  const results = await ensureBuiltinPipelinesCopied(dir);
+  const defaultCopy = results.find((r) => r.name === "default-codeloop");
+  assert.equal(defaultCopy?.created, false);
+  const raw = await readFile(join(dir, "default-codeloop.yaml"), "utf8");
+  assert.match(raw, /type: agent/);
+  assert.doesNotMatch(raw, /planLoop/);
 });
 
 test("loadPipeline: custom pipeline in .codeloop/pipelines wins over builtin", async () => {

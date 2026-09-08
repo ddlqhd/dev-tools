@@ -67,15 +67,16 @@ Standard workflow:
 
 program
   .command("init")
-  .description("Create .codeloop/ layout and default config.yaml")
+  .description("Create .codeloop/ layout, default config.yaml, and builtin pipelines")
   .option("--repo <path>", "repo path", process.cwd())
   .option("--with-skills", "also copy bundled skills into .cursor/.claude/.opencode")
   .addHelpText(
     "after",
     `
 Idempotent. Does not probe engines (use doctor for that).
-In a git repo, adds /.codeloop/ to .git/info/exclude so .codeloop/ is ignored
-without touching the working-tree .gitignore.
+Copies bundled pipeline templates into .codeloop/pipelines/ (skips files that
+already exist). In a git repo, adds /.codeloop/ to .git/info/exclude so
+.codeloop/ is ignored without touching the working-tree .gitignore.
 run and serve still create .codeloop/ on first use if you skip init.
 
 Examples:
