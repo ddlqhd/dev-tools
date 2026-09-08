@@ -5,6 +5,7 @@ import { isMap, parse as parseYaml, parseDocument, Scalar, stringify as stringif
 import { z } from "zod";
 import { resolveNodeEngineKey, type NodeSpec } from "@devtools/shared";
 import { DEFAULT_ENGINE_ALIASES, DEFAULT_PROMPTS } from "./prompts/index.js";
+import { excludeCodeloopState } from "./git/worktree.js";
 
 export const CodeloopConfigSchema = z.object({
   version: z.literal(1),
@@ -172,10 +173,6 @@ export function isCodeloopInitialized(repoPath: string): boolean {
   return existsSync(join(repoPath, ".codeloop", "config.yaml"));
 }
 
-function gitignoreMentionsCodeloop(content: string): boolean {
-  return content.split("\n").some((l) => l.trim() === ".codeloop/" || l.trim() === ".codeloop");
-}
-
 /** Create `.codeloop/` layout and default config. Idempotent; reports what changed. */
 export async function initCodeloop(repoPath: string): Promise<InitResult> {
   const root = join(repoPath, ".codeloop");
@@ -207,18 +204,9 @@ export async function initCodeloop(repoPath: string): Promise<InitResult> {
     }
   }
 
-  const gi = join(repoPath, ".gitignore");
-  if (existsSync(gi)) {
-    const content = await readFile(gi, "utf8");
-    if (gitignoreMentionsCodeloop(content)) {
-      actions.push({ path: ".gitignore", status: "exists" });
-    } else {
-      await writeFile(gi, `${content.trimEnd()}\n\n.codeloop/\n`, "utf8");
-      actions.push({ path: ".gitignore", status: "updated" });
-    }
-  } else if (existsSync(join(repoPath, ".git"))) {
-    await writeFile(gi, ".codeloop/\n", "utf8");
-    actions.push({ path: ".gitignore", status: "created" });
+  const excludeStatus = await excludeCodeloopState(repoPath);
+  if (excludeStatus) {
+    actions.push({ path: ".git/info/exclude", status: excludeStatus });
   }
 
   return { root, actions };

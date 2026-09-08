@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -181,15 +182,14 @@ export async function createInplaceWorktree(repoPath: string): Promise<GitWorktr
 }
 
 /**
- * Inplace mode shares its checkout with `.codeloop/`, so the state directory has
- * to be invisible to git: otherwise `add -A` commits it and `clean -fd` deletes
- * the running task's own store. Uses `.git/info/exclude` to leave the
- * repository's tracked `.gitignore` alone.
+ * Hide `.codeloop/` from git without touching the working-tree `.gitignore`.
+ * Writes `/.codeloop/` into the common `.git/info/exclude` (shared by worktrees).
  */
-async function excludeCodeloopState(repoPath: string): Promise<void> {
-  const gitCommonDir = (await git(repoPath, ["rev-parse", "--git-common-dir"])).trim();
-  const gitDir = isAbsolute(gitCommonDir) ? gitCommonDir : join(repoPath, gitCommonDir);
-  const excludePath = join(gitDir, "info", "exclude");
+export async function excludeCodeloopState(
+  repoPath: string,
+): Promise<"created" | "updated" | "exists" | undefined> {
+  const excludePath = await resolveGitExcludePath(repoPath);
+  if (!excludePath) return undefined;
 
   let content = "";
   try {
@@ -198,11 +198,31 @@ async function excludeCodeloopState(repoPath: string): Promise<void> {
     // no exclude file yet
   }
   const patterns = new Set(["/.codeloop/", ".codeloop/", ".codeloop"]);
-  if (content.split("\n").some((line) => patterns.has(line.trim()))) return;
+  if (content.split("\n").some((line) => patterns.has(line.trim()))) return "exists";
 
   await mkdir(dirname(excludePath), { recursive: true });
   const prefix = content.trim() ? `${content.trimEnd()}\n` : "";
   await writeFile(excludePath, `${prefix}/.codeloop/\n`, "utf8");
+  return content.trim() ? "updated" : "created";
+}
+
+async function resolveGitExcludePath(repoPath: string): Promise<string | null> {
+  try {
+    const gitCommonDir = (await git(repoPath, ["rev-parse", "--git-common-dir"])).trim();
+    if (!gitCommonDir) return null;
+    const gitDir = isAbsolute(gitCommonDir) ? gitCommonDir : join(repoPath, gitCommonDir);
+    return join(gitDir, "info", "exclude");
+  } catch {
+    const gitDir = join(repoPath, ".git");
+    try {
+      if (existsSync(gitDir) && statSync(gitDir).isDirectory()) {
+        return join(gitDir, "info", "exclude");
+      }
+    } catch {
+      // not a git dir
+    }
+    return null;
+  }
 }
 
 export async function openExistingWorktree(

@@ -74,7 +74,8 @@ program
     "after",
     `
 Idempotent. Does not probe engines (use doctor for that).
-In a git repo, creates or updates .gitignore so .codeloop/ is ignored.
+In a git repo, adds /.codeloop/ to .git/info/exclude so .codeloop/ is ignored
+without touching the working-tree .gitignore.
 run and serve still create .codeloop/ on first use if you skip init.
 
 Examples:

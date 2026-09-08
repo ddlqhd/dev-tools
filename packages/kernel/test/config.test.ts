@@ -1,7 +1,8 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, rm, stat, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -44,16 +45,17 @@ test("ensureCodeloopDir: creates layout + default config", async () => {
   }
 });
 
-test("ensureCodeloopDir: appends .codeloop/ to an existing .gitignore", async () => {
+test("ensureCodeloopDir: leaves an existing .gitignore untouched", async () => {
   await writeFile(join(repo, ".gitignore"), "node_modules/\n", "utf8");
   await ensureCodeloopDir(repo);
   const gi = await readFile(join(repo, ".gitignore"), "utf8");
-  assert.match(gi, /\.codeloop\//);
+  assert.equal(gi, "node_modules/\n");
 });
 
 test("ensureCodeloopDir: no .gitignore in non-git dir is tolerated", async () => {
   // second call must not throw even though no .gitignore exists
   await ensureCodeloopDir(repo);
+  assert.equal(existsSync(join(repo, ".gitignore")), false);
 });
 
 test("loadConfig: defaults for a fresh repo", async () => {
@@ -185,31 +187,40 @@ test("initCodeloop: reports created then exists", async () => {
   }
 });
 
-test("initCodeloop: creates .gitignore in a git repo that lacks one", async () => {
-  const fresh = await mkdtemp(join(tmpdir(), "codeloop-init-gi-create-"));
+test("initCodeloop: writes .git/info/exclude and does not create .gitignore", async () => {
+  const fresh = await mkdtemp(join(tmpdir(), "codeloop-init-exclude-"));
   try {
-    await mkdir(join(fresh, ".git"));
+    execFileSync("git", ["init", "-b", "main"], { cwd: fresh });
     const first = await initCodeloop(fresh);
-    assert.equal(first.actions.find((a) => a.path === ".gitignore")?.status, "created");
-    const gi = await readFile(join(fresh, ".gitignore"), "utf8");
-    assert.equal(gi, ".codeloop/\n");
+    assert.ok(
+      ["created", "updated"].includes(first.actions.find((a) => a.path === ".git/info/exclude")?.status ?? ""),
+      "exclude is created or appended on first init",
+    );
+    assert.equal(existsSync(join(fresh, ".gitignore")), false);
+    const exclude = await readFile(join(fresh, ".git", "info", "exclude"), "utf8");
+    assert.match(exclude, /^\/\.codeloop\/$/m);
+    assert.match(
+      execFileSync("git", ["check-ignore", "-v", ".codeloop"], { cwd: fresh, encoding: "utf8" }),
+      /\.codeloop/,
+    );
     const second = await initCodeloop(fresh);
-    assert.equal(second.actions.find((a) => a.path === ".gitignore")?.status, "exists");
+    assert.equal(second.actions.find((a) => a.path === ".git/info/exclude")?.status, "exists");
   } finally {
     await rm(fresh, { recursive: true, force: true });
   }
 });
 
-test("initCodeloop: updates .gitignore when present", async () => {
+test("initCodeloop: does not append to an existing .gitignore", async () => {
   const fresh = await mkdtemp(join(tmpdir(), "codeloop-init-gi-"));
   try {
+    execFileSync("git", ["init", "-b", "main"], { cwd: fresh });
     await writeFile(join(fresh, ".gitignore"), "node_modules/\n", "utf8");
     const first = await initCodeloop(fresh);
-    assert.equal(first.actions.find((a) => a.path === ".gitignore")?.status, "updated");
-    const gi = await readFile(join(fresh, ".gitignore"), "utf8");
-    assert.match(gi, /\.codeloop\//);
-    const second = await initCodeloop(fresh);
-    assert.equal(second.actions.find((a) => a.path === ".gitignore")?.status, "exists");
+    assert.equal(first.actions.find((a) => a.path === ".gitignore"), undefined);
+    assert.equal(await readFile(join(fresh, ".gitignore"), "utf8"), "node_modules/\n");
+    assert.ok(
+      ["created", "updated"].includes(first.actions.find((a) => a.path === ".git/info/exclude")?.status ?? ""),
+    );
   } finally {
     await rm(fresh, { recursive: true, force: true });
   }

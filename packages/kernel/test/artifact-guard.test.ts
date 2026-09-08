@@ -59,6 +59,16 @@ test("assertOnlyAllowedWrites: violation throws and resets the worktree", async 
   await assert.rejects(() => access(join(wt.worktreePath, "src.ts")));
 });
 
+test("assertOnlyAllowedWrites: rewriting .gitignore is a violation", async () => {
+  await writeFile(join(wt.worktreePath, ".gitignore"), ".codeloop/\n", "utf8");
+  await assert.rejects(
+    () => assertOnlyAllowedWrites(wt, [".codeloop-review.json"], [], base),
+    /\.gitignore/,
+  );
+  assert.equal(await wt.head(), base);
+  await assert.rejects(() => access(join(wt.worktreePath, ".gitignore")));
+});
+
 test("assertOnlyAllowedWrites: engine-reported path also counts", async () => {
   await writeFile(join(wt.worktreePath, "evil.txt"), "x", "utf8");
   await assert.rejects(
@@ -67,9 +77,19 @@ test("assertOnlyAllowedWrites: engine-reported path also counts", async () => {
   );
 });
 
-test("assertOnlyAllowedWrites: node_modules symlink is exempt", async () => {
+test("assertOnlyAllowedWrites: node_modules symlink is exempt", async (t) => {
   const target = await mkdtemp(join(tmpdir(), "codeloop-nm-"));
-  await symlink(target, join(wt.worktreePath, "node_modules"), "dir");
+  try {
+    await symlink(target, join(wt.worktreePath, "node_modules"), "dir");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("symlink not permitted on this Windows account");
+      await rm(target, { recursive: true, force: true });
+      return;
+    }
+    throw err;
+  }
   try {
     await assertOnlyAllowedWrites(wt, [".codeloop-review.json"], ["node_modules/pkg/x.js"], base);
   } finally {
